@@ -1,4 +1,4 @@
-# scrcpy GUI
+# Scrcpy GUI
 
 Interfaz gráfica para [scrcpy](https://github.com/Genymobile/scrcpy): mirror de Android, cámara como webcam, conexión WiFi y presets de calidad.
 
