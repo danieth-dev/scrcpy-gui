@@ -4,6 +4,8 @@ Interfaz gráfica para [scrcpy](https://github.com/Genymobile/scrcpy): mirror de
 
 > **No es el proyecto oficial de scrcpy.** Es un frontend independiente. El motor sigue siendo scrcpy (Genymobile, Apache-2.0).
 
+![Demo de scrcpy GUI](docs/demo.gif)
+
 ## Características
 
 - Dispositivos USB y WiFi (vincular, conectar, Activar y conectar → `:5555`)
