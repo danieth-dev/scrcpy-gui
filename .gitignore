@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.local
+
+# Binarios de scrcpy (usar npm run vendor:sync)
+vendor/scrcpy/**
+!vendor/scrcpy/.gitkeep

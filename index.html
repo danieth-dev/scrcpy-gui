@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scrcpy — Control de Android</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Custom title bar -->
+  <div class="titlebar" id="titlebar">
+    <div class="titlebar-logo">
+      <img src="logo.png" class="logo-img" alt="scrcpy" />
+      <span class="logo-text">scrcpy <span class="logo-version">GUI</span></span>
+    </div>
+    <div class="titlebar-actions">
+      <div class="status-pill" id="toolStatusPill">
+        <span class="status-dot"></span>
+        <span id="toolStatusText">Verificando…</span>
+      </div>
+    </div>
+    <div class="titlebar-controls">
+      <button class="win-btn" id="btnMin" title="Minimizar">─</button>
+      <button class="win-btn" id="btnMax" title="Maximizar">□</button>
+      <button class="win-btn danger" id="btnClose" title="Cerrar">✕</button>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="app-layout">
+
+    <!-- Sidebar nav -->
+    <nav class="sidebar">
+      <ul class="nav-list">
+        <li class="nav-item active" data-section="devices">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          </span>
+          <span class="nav-label">Dispositivos</span>
+        </li>
+        <li class="nav-item" data-section="wifi">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
+          </span>
+          <span class="nav-label">WiFi</span>
+        </li>
+        <li class="nav-item" data-section="sessions">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor" stroke="none"/></svg>
+          </span>
+          <span class="nav-label">Sesiones</span>
+          <span class="nav-badge" id="sessionsBadge" style="display:none">0</span>
+        </li>
+        <li class="nav-item" data-section="settings">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </span>
+          <span class="nav-label">Ajustes</span>
+        </li>
+
+      </ul>
+
+      <div class="sidebar-footer">
+        <div class="app-version" id="appVersionLabel" title="Versión de la app">v—</div>
+        <button class="btn-refresh" id="btnRefresh" title="Reescanear dispositivos (F5)">
+          <span class="refresh-icon">↻</span> Actualizar
+        </button>
+      </div>
+    </nav>
+
+    <!-- Content area -->
+    <main class="content">
+
+      <!-- ── DEVICES SECTION ─────────────────────────────────── -->
+      <section class="section active" id="section-devices">
+        <div class="section-header">
+          <h1>Dispositivos</h1>
+          <p>USB, WiFi o un clic en Recientes · F5 actualizar · Esc cerrar</p>
+        </div>
+
+        <div id="dupConnectionWarn" class="result-box warn" style="display:none; margin-bottom: 14px;">
+          Este teléfono aparece por USB y WiFi a la vez. Usa solo una conexión (mejor WiFi :5555) o la cámara puede fallar.
+        </div>
+
+        <div id="recentsBlock" class="recents-block" style="display:none">
+          <div class="subsection-header">
+            <h2 class="subsection-title">Recientes</h2>
+            <button type="button" class="btn-text" id="btnClearRecents">Limpiar</button>
+          </div>
+          <div id="recentsList" class="recents-list"></div>
+        </div>
+
+        <div class="subsection-header online-header">
+          <h2 class="subsection-title">Conectados ahora</h2>
+        </div>
+
+        <div id="devicesLoading" class="loading-state">
+          <div class="spinner"></div>
+          <span>Buscando dispositivos…</span>
+        </div>
+
+        <div id="devicesEmpty" class="empty-state" style="display:none">
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/><path d="M9 8h6M9 12h4"/></svg>
+          </div>
+          <h3>No hay dispositivos en línea</h3>
+          <p>Conecta por USB o ve a <strong>WiFi</strong> para vincular / pegar <code>IP:puerto</code> de Depuración inalámbrica.</p>
+          <button class="btn-primary" id="btnRefreshEmpty">Escanear de nuevo</button>
+        </div>
+
+        <div id="devicesList" class="devices-grid" style="display:none"></div>
+      </section>
+
+      <!-- ── WIFI SECTION ────────────────────────────────────── -->
+      <section class="section" id="section-wifi">
+        <div class="section-header">
+          <h1>Conectar por WiFi</h1>
+          <p>Primera vez: vincular · Cada día: conectar o usar Recientes</p>
+        </div>
+
+        <div class="wifi-cards">
+          <!-- Pair with wireless debugging code -->
+          <div class="card step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <h3>Vincular con código</h3>
+              <p>En el teléfono: Opciones de desarrollador → Depuración inalámbrica → Vincular con código. Copia IP:puerto de vinculación y el código de 6 dígitos.</p>
+              <div class="ip-row">
+                <input class="input-field endpoint-input" id="pairEndpoint" type="text" placeholder="192.168.1.6:37123" spellcheck="false" />
+                <input class="input-field code-input" id="pairCode" type="text" inputmode="numeric" placeholder="Código" maxlength="6" />
+                <button class="btn-primary" id="btnPairWifi">Vincular</button>
+              </div>
+              <div id="pairResult" class="result-box" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Connect with IP:port paste -->
+          <div class="card step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <h3>Conectar (pegar IP:puerto)</h3>
+              <p>Pega la dirección de Depuración inalámbrica (ej. <code>192.168.1.6:41759</code>). También sirve tras activar WiFi por USB (puerto 5555).</p>
+              <div style="margin-bottom: 10px;">
+                <select class="input-field" id="step2UsbSelect" style="width: 100%;">
+                  <option value="">— Seleccionar dispositivo USB (auto-completar IP:5555) —</option>
+                </select>
+              </div>
+              <div class="ip-row">
+                <input class="input-field endpoint-input" id="wifiEndpoint" type="text" placeholder="192.168.1.6:41759" spellcheck="false" />
+                <button class="btn-primary" id="btnConnectWifi">Conectar</button>
+              </div>
+              <!-- Hidden legacy fields kept for USB tcpip autofill -->
+              <input type="hidden" id="wifiIp" value="" />
+              <input type="hidden" id="wifiPort" value="5555" />
+              <div id="wifiConnectResult" class="result-box" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Optional: Enable via USB -->
+          <div class="card step-card">
+            <div class="step-num">·</div>
+            <div class="step-body">
+              <h3>Alternativa: activar por USB</h3>
+              <p>Una vez por cable. Activa ADB en el puerto 5555, conecta automáticamente y guarda en Recientes.</p>
+              <div class="device-select-row">
+                <select class="input-field" id="usbDeviceSelect">
+                  <option value="">— Selecciona un dispositivo USB —</option>
+                </select>
+                <button class="btn-secondary" id="btnEnableTcpip">Activar y conectar</button>
+              </div>
+              <div id="tcpipResult" class="result-box" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SESSIONS SECTION ───────────────────────────────── -->
+      <section class="section" id="section-sessions">
+        <div class="section-header">
+          <h1>Sesiones activas</h1>
+          <p>scrcpy en ejecución</p>
+        </div>
+        <div id="sessionsList" class="sessions-list">
+          <div class="empty-state">
+            <div class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            </div>
+            <h3>Sin sesiones activas</h3>
+            <p>Inicia scrcpy desde la sección de Dispositivos.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SETTINGS SECTION ───────────────────────────────── -->
+      <section class="section" id="section-settings">
+        <div class="section-header">
+          <h1>Ajustes predeterminados</h1>
+          <p>Configuración que se aplicará al lanzar scrcpy</p>
+        </div>
+
+        <div class="settings-grid">
+          <!-- ⚡ PRESETS SECTION -->
+          <div class="presets-section" style="grid-column: 1 / -1;">
+            <div class="presets-header">
+              <div class="presets-title-row">
+                <div>
+                  <h3 class="presets-title">Presets</h3>
+                  <p class="presets-subtitle">Aplicar y guardar automáticamente</p>
+                </div>
+                <div class="active-preset-badge" id="activePresetBadge" style="display:none">
+                  <span class="active-dot"></span>
+                  <span id="activePresetName">—</span>
+                </div>
+              </div>
+            </div>
+            <div class="presets-grid">
+
+              <button class="preset-card" id="presetDefault" data-preset="default">
+                <div class="preset-check" id="checkDefault">✓</div>
+                <div class="preset-name">Normal</div>
+                <div class="preset-desc">Uso general equilibrado</div>
+                <div class="preset-tags">
+                  <span class="preset-tag">1080p</span>
+                  <span class="preset-tag">30 fps</span>
+                  <span class="preset-tag">8 Mbps</span>
+                  <span class="preset-tag">H.264</span>
+                </div>
+              </button>
+
+              <button class="preset-card" id="presetWebcam" data-preset="webcam">
+                <div class="preset-check" id="checkWebcam">✓</div>
+                <div class="preset-name">Webcam</div>
+                <div class="preset-desc">Zoom, Meet, Teams</div>
+                <div class="preset-tags">
+                  <span class="preset-tag">720p</span>
+                  <span class="preset-tag">30 fps</span>
+                  <span class="preset-tag">5 Mbps</span>
+                  <span class="preset-tag">H.264</span>
+                </div>
+              </button>
+
+              <button class="preset-card" id="presetStream" data-preset="stream">
+                <div class="preset-check" id="checkStream">✓</div>
+                <div class="preset-name">Streams</div>
+                <div class="preset-desc">OBS · Twitch · YouTube Live</div>
+                <div class="preset-tags">
+                  <span class="preset-tag">1080p</span>
+                  <span class="preset-tag">60 fps</span>
+                  <span class="preset-tag">14 Mbps</span>
+                  <span class="preset-tag">H.265</span>
+                </div>
+              </button>
+
+              <button class="preset-card" id="presetGaming" data-preset="gaming">
+                <div class="preset-check" id="checkGaming">✓</div>
+                <div class="preset-name">Gaming</div>
+                <div class="preset-desc">Baja latencia para juegos</div>
+                <div class="preset-tags">
+                  <span class="preset-tag">720p</span>
+                  <span class="preset-tag">60 fps</span>
+                  <span class="preset-tag">6 Mbps</span>
+                  <span class="preset-tag">H.264</span>
+                </div>
+              </button>
+
+            </div>
+          </div>
+
+          <div class="card settings-card">
+            <h3>Video</h3>
+
+            <label class="setting-row">
+              <span class="setting-label">Resolución máxima</span>
+              <div class="setting-control">
+                <input type="range" id="maxSize" min="480" max="1920" step="120" value="1080" class="slider" />
+                <span class="slider-val" id="maxSizeVal">1080p</span>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">FPS máximos</span>
+              <div class="setting-control">
+                <input type="range" id="maxFps" min="15" max="120" step="5" value="60" class="slider" />
+                <span class="slider-val" id="maxFpsVal">60 fps</span>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">Bitrate</span>
+              <div class="setting-control">
+                <input type="range" id="bitrate" min="2" max="20" step="1" value="8" class="slider" />
+                <span class="slider-val" id="bitrateVal">8 Mbps</span>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">Codec</span>
+              <div class="setting-control">
+                <select class="input-field small-select" id="codec">
+                  <option value="h264">H.264 (compatible)</option>
+                  <option value="h265">H.265 (mejor calidad)</option>
+                </select>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">Cámara</span>
+              <div class="setting-control">
+                <select class="input-field small-select" id="cameraFacing">
+                  <option value="front">Frontal</option>
+                  <option value="back">Trasera / exterior</option>
+                </select>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">Orientación</span>
+              <div class="setting-control">
+                <select class="input-field small-select" id="orientation">
+                  <option value="0">Normal</option>
+                  <option value="270">Girar izquierda</option>
+                  <option value="90">Girar derecha</option>
+                  <option value="180">Invertir</option>
+                </select>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <span class="setting-label">Zoom cámara</span>
+              <div class="setting-control">
+                <input type="range" id="cameraZoom" min="1" max="5" step="0.1" value="1" class="slider" />
+                <span class="slider-val" id="cameraZoomVal">1.0×</span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-label">Linterna (torch)</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="cameraTorch" />
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+          </div>
+
+          <div class="card settings-card">
+            <h3>Comportamiento</h3>
+
+            <label class="toggle-row">
+              <span class="setting-label">Silenciar audio</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="noAudio" />
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-label">Mantener pantalla encendida</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="stayAwake" checked />
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <span class="setting-label">Apagar pantalla del teléfono al conectar</span>
+              <div class="toggle-switch">
+                <input type="checkbox" id="screenOff" />
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+          <div class="card settings-card" style="grid-column: 1 / -1;">
+            <h3>Acerca de y actualizaciones</h3>
+            <p class="about-text" id="aboutText">scrcpy GUI</p>
+            <div class="about-actions">
+              <button type="button" class="btn-secondary" id="btnCheckUpdates">Buscar actualizaciones</button>
+              <button type="button" class="btn-text" id="btnOpenReleases">Releases en GitHub</button>
+            </div>
+            <div id="updateResult" class="result-box" style="display:none; margin-top: 12px;"></div>
+            <p class="about-credit">Basado en <strong>scrcpy</strong> (Genymobile) · Apache-2.0</p>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button class="btn-secondary" id="btnResetSettings">Restablecer defaults</button>
+          <button class="btn-primary" id="btnSaveSettings">Guardar ajustes</button>
+        </div>
+      </section>
+
+
+
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Device action modal -->
+  <div class="modal-overlay" id="deviceModal" style="display:none">
+    <div class="modal">
+      <button class="modal-close" id="modalClose">✕</button>
+      <div class="modal-device-info" id="modalDeviceInfo"></div>
+      <div class="modal-actions">
+        <button class="action-btn primary big" id="modalLaunch">
+          <span class="action-icon">▶</span>
+          <span>Iniciar Mirror</span>
+        </button>
+        <button class="action-btn" id="modalScreenshot">
+          <span>Captura</span>
+        </button>
+        <button class="action-btn" id="modalCamera">
+          <span>Cámara</span>
+        </button>
+        <button class="action-btn" id="modalRecord">
+          <span>Grabar</span>
+        </button>
+        <button class="action-btn danger" id="modalDisconnect">
+          <span>Desconectar</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

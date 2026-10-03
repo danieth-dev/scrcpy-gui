@@ -1,0 +1,62 @@
+{
+  "name": "scrcpy-gui",
+  "version": "1.0.0",
+  "description": "Interfaz gráfica para scrcpy: mirror, cámara/webcam, WiFi y presets",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --win portable",
+    "vendor:sync": "node scripts/sync-vendor.js",
+    "release:check": "node -e \"const p=require('./package.json'); console.log('version', p.version); console.log('repo', p.repository && p.repository.url)\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danieth-dev/scrcpy-gui.git"
+  },
+  "homepage": "https://github.com/danieth-dev/scrcpy-gui",
+  "bugs": {
+    "url": "https://github.com/danieth-dev/scrcpy-gui/issues"
+  },
+  "build": {
+    "appId": "com.scrcpy.gui",
+    "productName": "scrcpy GUI",
+    "icon": "logo.ico",
+    "win": {
+      "target": "portable",
+      "icon": "logo.ico"
+    },
+    "extraResources": [
+      {
+        "from": "vendor/scrcpy",
+        "to": "scrcpy",
+        "filter": ["**/*"]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "danieth-dev",
+        "repo": "scrcpy-gui",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "author": {
+    "name": "danieth",
+    "url": "https://github.com/danieth-dev"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "scrcpy",
+    "android",
+    "mirror",
+    "webcam",
+    "adb",
+    "electron"
+  ]
+}

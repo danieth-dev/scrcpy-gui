@@ -1,0 +1,12 @@
+scrcpy GUI
+Copyright (c) 2026 danieth
+
+This product includes software developed as a graphical frontend for scrcpy.
+
+scrcpy
+Copyright (c) Genymobile and contributors
+https://github.com/Genymobile/scrcpy
+Licensed under the Apache License, Version 2.0
+
+Electron and Chromium components are licensed under their respective licenses
+(see licenses bundled with Electron builds).
