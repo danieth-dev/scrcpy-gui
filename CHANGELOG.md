@@ -4,6 +4,13 @@ Todos los cambios notables de **scrcpy GUI** se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Versionado: [SemVer](https://semver.org/lang/es/).
 
+## [1.2.0] — 2026-10-02
+
+### Añadido
+- Primer release público en GitHub con repositorio oficial
+- Identidad de autor configurada (`danieth` / `danieth-dev`)
+- Portable `.exe` listo para descarga directa
+
 ## [1.0.0] — 2026-10-02
 
 ### Añadido
