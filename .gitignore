@@ -15,3 +15,6 @@ vendor/scrcpy/**
 vendor/uxplay/**
 !vendor/uxplay/.gitkeep
 
+*.ipa
+build/
+

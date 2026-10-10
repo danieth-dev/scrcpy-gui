@@ -4,6 +4,16 @@ Todos los cambios notables de **scrcpy GUI** se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Versionado: [SemVer](https://semver.org/lang/es/).
 
+## [1.3.0] — 2026-10-10
+
+### Añadido
+- Soporte para cámara de iPhone mediante cable USB físico nativo (usbmuxd) con cero latencia (<10 ms).
+- Modo pantalla negra OLED en la app complementaria iOS ScrcpyCam para máximo ahorro de batería y cero calor.
+- Selector dinámico en la interfaz: Cable USB (Cero Latencia) vs AirPlay (Wi-Fi).
+- Monitor de bitrate USB y estado de dispositivo en tiempo real.
+- Corrección de lanzamiento de OBS en Windows con bypass de bloqueo por permisos.
+- Corrección de diseño del panel de iPhone y resolución de errores visuales.
+
 ## [1.2.0] — 2026-10-02
 
 ### Añadido
