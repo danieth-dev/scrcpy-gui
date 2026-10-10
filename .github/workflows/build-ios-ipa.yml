@@ -22,6 +22,7 @@ jobs:
 
       - name: Setup iOS compilation
         run: |
+          set -e -o pipefail
           mkdir -p build/Payload/ScrcpyCam.app
           
           echo "Compilando Swift para arquitectura arm64 de iOS..."
@@ -50,8 +51,8 @@ jobs:
           cd build
           zip -r ScrcpyCam.ipa Payload
 
-      - name: Upload Compile Log on Failure
-        if: failure()
+      - name: Upload Compile Log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compile-log
