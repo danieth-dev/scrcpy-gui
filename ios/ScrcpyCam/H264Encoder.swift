@@ -41,9 +41,9 @@ class H264Encoder {
         // Configuración para latencia de transmisión en tiempo real ultra baja
         VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
-        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
-        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: fps as CFNumber)
+        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: (bitrate as NSNumber))
+        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: (fps as NSNumber))
+        VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (fps as NSNumber))
         VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse) // Cero B-Frames = Cero retardo
         
         VTCompressionSessionPrepareToEncodeFrames(compressionSession)
@@ -72,10 +72,11 @@ class H264Encoder {
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         
         // Verificar si es un fotograma clave (Keyframe / IDR)
-        let isKeyframe = !CFDictionaryContainsKey(
-            unsafeBitCast(CFArrayGetValueAtIndex(CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false), 0), to: CFDictionary.self),
-            Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque()
-        )
+        var isKeyframe = false
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
+           let first = attachments.first {
+            isKeyframe = (first[kCMSampleAttachmentKey_NotSync] == nil)
+        }
         
         // Si es fotograma clave, extraer SPS y PPS y anteponerlos
         if isKeyframe, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {

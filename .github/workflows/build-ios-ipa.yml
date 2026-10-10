@@ -39,7 +39,7 @@ jobs:
             ios/ScrcpyCam/USBServer.swift \
             ios/ScrcpyCam/ContentView.swift \
             ios/ScrcpyCam/ScrcpyCamApp.swift \
-            -o build/Payload/ScrcpyCam.app/ScrcpyCam
+            -o build/Payload/ScrcpyCam.app/ScrcpyCam 2>&1 | tee compile.log
 
           cp ios/ScrcpyCam/Info.plist build/Payload/ScrcpyCam.app/Info.plist
 
@@ -49,6 +49,13 @@ jobs:
           echo "Creando paquete ScrcpyCam.ipa..."
           cd build
           zip -r ScrcpyCam.ipa Payload
+
+      - name: Upload Compile Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-log
+          path: compile.log
 
       - name: Upload ScrcpyCam.ipa Artifact
         uses: actions/upload-artifact@v4
