@@ -18,16 +18,16 @@ class USBServer: ObservableObject {
     }
     
     func start() {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return }
+        
+        let tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.noDelay = true
+        
+        let params = NWParameters(tls: nil, tcp: tcpOptions)
+        params.allowLocalEndpointReuse = true
+        
         do {
-            let params = NWParameters.tcp
-            params.allowLocalEndpointReuse = true
-            
-            // Optimizar para baja latencia (desactivar Nagle)
-            if let tcpOptions = params.defaultProtocolStack.transportProtocols.first as? NWProtocolTCP.Options {
-                tcpOptions.noDelay = true
-            }
-            
-            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            listener = try NWListener(using: params, on: endpointPort)
             
             listener?.stateUpdateHandler = { [weak self] state in
                 switch state {
