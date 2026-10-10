@@ -81,7 +81,12 @@ navItems.forEach(item => {
     navItems.forEach(n => n.classList.remove('active'));
     item.classList.add('active');
     sections.forEach(s => s.classList.remove('active'));
-    document.getElementById(`section-${target}`).classList.add('active');
+    const sectionEl = document.getElementById(`section-${target}`);
+    if (sectionEl) {
+      sectionEl.classList.add('active');
+    } else {
+      console.error(`[nav] Sección no encontrada: section-${target}`);
+    }
   });
 });
 
@@ -1034,7 +1039,7 @@ function updateSessionsUI() {
 }
 
 // ── Listen for scrcpy exiting ──────────────────────────────────
-window.api.onScrcpyStopped(({ serial, error, earlyFail }) => {
+window.api?.onScrcpyStopped?.(({ serial, error, earlyFail }) => {
   if (state.restartingSerials.has(serial)) return;
   if (state.sessions[serial]) {
     const name = (state.sessions[serial].model || serial);
@@ -1151,6 +1156,385 @@ $('btnOpenReleases')?.addEventListener('click', async () => {
   if (url) window.api.openExternal(url);
   else showToast('No se pudo determinar la URL de releases. Revisa package.json.', 'error');
 });
+
+// ── iPhone / AirPlay + OBS Virtual Camera ─────────────────────
+const iphoneState = {
+  uxplayRunning: false,
+  obsVcamRunning: false,
+  mode: 'screen', // 'screen' | 'camera'
+};
+
+// Quality presets mapped to UxPlay args
+const QUALITY_PRESETS = {
+  max:    { fps: 60, res: '1920x1080@60', label: '1080p / 60 fps' },
+  high:   { fps: 30, res: '1920x1080@30', label: '1080p / 30 fps' },
+  medium: { fps: 30, res: '1280x720@30',  label: '720p / 30 fps'  },
+};
+
+function initIphoneModeSelector() {
+  const modeBtns = $$('.iphone-mode-btn');
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (iphoneState.uxplayRunning) return; // can't switch while running
+      modeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      iphoneState.mode = btn.dataset.mode;
+      updateIphoneModeUI();
+    });
+  });
+}
+
+function updateIphoneModeUI() {
+  const isCamera    = iphoneState.mode === 'camera';
+  const label       = $('btnStartIphoneLabel');
+  const title       = $('iphoneCardTitle');
+  const subtitle    = $('iphoneCardSubtitle');
+  const stepsScreen = $('stepsScreen');
+  const stepsCamera = $('stepsCamera');
+  const stepsTitle  = $('iphoneStepsTitle');
+
+  if (label)    label.textContent    = isCamera ? 'Iniciar Cámara' : 'Iniciar como Webcam';
+  if (title)    title.textContent    = isCamera ? 'Cámara AirPlay' : 'Receptor AirPlay';
+  if (subtitle) subtitle.textContent = isCamera
+    ? 'Transmite solo la cámara del iPhone a este PC vía Wi-Fi'
+    : 'El iPhone transmite su pantalla a este PC vía Wi-Fi';
+  if (stepsTitle)  stepsTitle.textContent = isCamera
+    ? '📸 Cómo usar la Cámara del iPhone'
+    : '📱 Cómo conectar tu iPhone';
+  if (stepsScreen) stepsScreen.style.display = isCamera ? 'none' : 'block';
+  if (stepsCamera) stepsCamera.style.display = isCamera ? 'block' : 'none';
+}
+
+async function initIphoneSection() {
+  if (!window.api?.iphoneToolsStatus) return;
+  const status = await window.api.iphoneToolsStatus();
+
+  const uxAlert  = $('uxplayMissingAlert');
+  const obsAlert = $('obsMissingAlert');
+  const startBtn = $('btnStartIphone');
+  const useObsCb = $('iphoneUseObs');
+
+  if (!status.uxplay && uxAlert) { uxAlert.style.display = 'flex'; }
+  if (!status.obs   && obsAlert) { obsAlert.style.display = 'flex'; }
+
+  if (!status.uxplay && startBtn) {
+    startBtn.disabled  = true;
+    startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>UxPlay requerido</span>';
+  }
+  if (!status.obs && useObsCb) {
+    useObsCb.checked  = false;
+    useObsCb.disabled = true;
+  } else if (useObsCb) {
+    const savedUseObs = localStorage.getItem('scrcpy-iphone-use-obs');
+    if (savedUseObs !== null) {
+      useObsCb.checked = savedUseObs === 'true';
+    }
+    useObsCb.addEventListener('change', () => {
+      localStorage.setItem('scrcpy-iphone-use-obs', String(useObsCb.checked));
+    });
+  }
+
+  initIphoneModeSelector();
+  iphoneState.uxplayRunning = !!status.running;
+  updateIphoneModeUI();
+  updateIphoneUI();
+}
+
+
+function updateIphoneUI() {
+  const { uxplayRunning } = iphoneState;
+  const badge    = $('iphoneBadge');
+  const navBadge = $('iphoneNavBadge');
+  const startBtn = $('btnStartIphone');
+  const stopBtn  = $('btnStopIphone');
+  const useObs   = $('iphoneUseObs')?.checked;
+
+  if (uxplayRunning) {
+    if (badge) {
+      badge.className   = 'status-pill ok';
+      badge.textContent = useObs ? '🎥 Webcam activa' : '📡 AirPlay activo';
+    }
+    if (navBadge) navBadge.style.display = 'inline';
+    if (startBtn) startBtn.style.display = 'none';
+    if (stopBtn)  stopBtn.style.display  = 'inline-flex';
+  } else {
+    if (badge) {
+      badge.className   = 'status-pill';
+      badge.textContent = 'Inactivo';
+    }
+    if (navBadge) navBadge.style.display = 'none';
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (stopBtn)  stopBtn.style.display  = 'none';
+  }
+}
+
+function setIphoneStatus(msg, type = 'info') {
+  const box = $('iphoneStatusMsg');
+  if (!box) return;
+  box.style.display = 'block';
+  box.className = `result-box${type === 'error' ? ' err' : type === 'success' ? ' ok' : ''}`;
+  box.textContent = msg;
+}
+
+$('btnStartIphone')?.addEventListener('click', async () => {
+  const name     = $('iphoneName')?.value?.trim() || 'scrcpy GUI';
+  const useObs   = $('iphoneUseObs')?.checked ?? true;
+  const quality  = $('iphoneQuality')?.value || 'max';
+  const startBtn = $('btnStartIphone');
+  const qPreset  = QUALITY_PRESETS[quality] || QUALITY_PRESETS.max;
+
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Iniciando…</span>';
+
+  // 1) Start UxPlay con modo y calidad
+  const uxRes = await window.api.iphoneStartUxPlay({
+    name,
+    fps: qPreset.fps,
+    res: qPreset.res,
+    cameraMode: iphoneState.mode === 'camera',
+  });
+  if (!uxRes.ok) {
+    setIphoneStatus('❌ Error UxPlay: ' + uxRes.error, 'error');
+    startBtn.disabled = false;
+    const errLbl = $('btnStartIphoneLabel');
+    if (errLbl) errLbl.textContent = iphoneState.mode === 'camera' ? 'Iniciar Cámara' : 'Iniciar como Webcam';
+    return;
+  }
+  iphoneState.uxplayRunning = true;
+  updateIphoneUI();
+
+  // 2) OBS Virtual Camera
+  if (useObs) {
+    setIphoneStatus('✅ UxPlay listo. Conectando con OBS Virtual Camera…', 'info');
+
+    // Give UxPlay a moment to open its window before OBS tries to capture it
+    await new Promise(r => setTimeout(r, 1500));
+
+    const obsRes = await window.api.iphoneObsVirtualCam({ start: true });
+    if (obsRes.ok) {
+      iphoneState.obsVcamRunning = true;
+      const fallback = obsRes.fallback
+        ? ' OBS abrirá en unos segundos. Luego añade Window Capture apuntando a la ventana UxPlay.'
+        : '';
+      setIphoneStatus(
+        `🎥 Webcam activa${fallback}\n` +
+        `→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"\n` +
+        `→ En Zoom/Teams: selecciona "OBS Virtual Camera"`,
+        'success'
+      );
+      showToast(`📱 iPhone Webcam lista · Busca "${name}" en tu iPhone`, 'success');
+    } else {
+      setIphoneStatus(
+        `📡 AirPlay listo, pero OBS Virtual Camera falló: ${obsRes.error}\n` +
+        `→ Abre OBS manualmente → Controls → "Start Virtual Camera"\n` +
+        `→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"`,
+        'info'
+      );
+      showToast(`AirPlay listo · Arranca OBS Virtual Camera manualmente`, 'info');
+    }
+  } else {
+    setIphoneStatus(
+      `📡 Receptor AirPlay listo.\n→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"`,
+      'success'
+    );
+    showToast(`AirPlay listo · Busca "${name}" en tu iPhone`, 'success');
+  }
+
+  startBtn.disabled = false;
+  // Update the name hint in instructions
+  const hint    = $('iphoneNameHint');
+  const hintCam = $('iphoneNameHintCam');
+  if (hint)    hint.textContent    = `"${name}"`;
+  if (hintCam) hintCam.textContent = `"${name}"`;
+  // Restore button label
+  const lbl = $('btnStartIphoneLabel');
+  if (lbl) lbl.textContent = iphoneState.mode === 'camera' ? 'Iniciar C\u00e1mara' : 'Iniciar como Webcam';
+  updateIphoneUI();
+});
+
+$('btnStopIphone')?.addEventListener('click', async () => {
+  if (iphoneState.obsVcamRunning) {
+    await window.api.iphoneObsVirtualCam({ start: false });
+    iphoneState.obsVcamRunning = false;
+  }
+  await window.api.iphoneStopUxPlay();
+  iphoneState.uxplayRunning = false;
+  const box = $('iphoneStatusMsg');
+  if (box) box.style.display = 'none';
+  updateIphoneUI();
+  showToast('iPhone webcam detenida', 'info');
+});
+
+// Live-update instructions name hint as user types
+$('iphoneName')?.addEventListener('input', () => {
+  const v = $('iphoneName').value.trim() || 'scrcpy GUI';
+  const hint = $('iphoneNameHint');
+  if (hint) hint.textContent = `"${v}"`;
+});
+
+// External link buttons
+$('btnGetUxPlay')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://github.com/leapbtw/uxplay-windows/releases');
+});
+$('btnGetObs')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://obsproject.com/download');
+});
+
+// Handle unexpected UxPlay exit
+window.api?.onIphoneUxPlayStopped?.(() => {
+  iphoneState.uxplayRunning   = false;
+  iphoneState.obsVcamRunning  = false;
+  const box = $('iphoneStatusMsg');
+  if (box) box.style.display = 'none';
+  updateIphoneUI();
+  showToast('Receptor AirPlay detenido', 'info');
+});
+
+// ── iPhone USB Direct Camera (usbmuxd) ──────────────────────────
+const iphoneUsbState = {
+  devices: [],
+  streaming: false,
+};
+
+function initIphoneConnSelector() {
+  const connBtns = $$('#iphoneConnSelector .iphone-mode-btn');
+  const usbSection = $('iphoneUsbSection');
+  const airplaySection = $('iphoneAirplaySection');
+
+  connBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      connBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const conn = btn.dataset.conn;
+      if (usbSection) usbSection.style.display = (conn === 'usb') ? 'block' : 'none';
+      if (airplaySection) airplaySection.style.display = (conn === 'airplay') ? 'block' : 'none';
+    });
+  });
+}
+
+function updateIphoneUsbUI() {
+  const badge = $('iphoneUsbBadge');
+  const devName = $('iphoneUsbDeviceName');
+  const devSerial = $('iphoneUsbDeviceSerial');
+  const startBtn = $('btnStartIphoneUsb');
+  const stopBtn = $('btnStopIphoneUsb');
+  const statsBox = $('iphoneUsbLiveStats');
+
+  const hasDevice = iphoneUsbState.devices.length > 0;
+  const isStreaming = iphoneUsbState.streaming;
+
+  if (isStreaming) {
+    if (badge) { badge.className = 'status-pill ok'; badge.textContent = '⚡ Transmitiendo por USB'; }
+    if (startBtn) startBtn.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
+    if (statsBox) statsBox.style.display = 'flex';
+  } else if (hasDevice) {
+    if (badge) { badge.className = 'status-pill ok'; badge.textContent = '🟢 iPhone Conectado'; }
+    if (devName) devName.textContent = 'iPhone detectado por cable USB';
+    if (devSerial) devSerial.textContent = `ID usbmuxd: ${iphoneUsbState.devices[0].deviceId || iphoneUsbState.devices[0].serial} · Cable listo`;
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.style.display = 'inline-flex';
+    }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (statsBox) statsBox.style.display = 'none';
+  } else {
+    if (badge) { badge.className = 'status-pill'; badge.textContent = 'Esperando cable USB…'; }
+    if (devName) devName.textContent = 'Buscando iPhone conectado por cable USB…';
+    if (devSerial) devSerial.textContent = 'Conecta tu iPhone por cable USB a la PC';
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.style.display = 'inline-flex';
+    }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (statsBox) statsBox.style.display = 'none';
+  }
+}
+
+async function refreshIphoneUsbStatus() {
+  if (!window.api?.iphoneUsbStatus) return;
+  try {
+    const res = await window.api.iphoneUsbStatus();
+    iphoneUsbState.devices = res.devices || [];
+    iphoneUsbState.streaming = !!res.streaming;
+    updateIphoneUsbUI();
+  } catch (_) {}
+}
+
+$('btnStartIphoneUsb')?.addEventListener('click', async () => {
+  const startBtn = $('btnStartIphoneUsb');
+  const statusBox = $('iphoneUsbStatusMsg');
+  const useObs = $('iphoneUsbUseObs')?.checked;
+
+  if (startBtn) startBtn.disabled = true;
+  if (statusBox) statusBox.style.display = 'none';
+
+  const res = await window.api.iphoneUsbStartStream({ port: 50005 });
+  if (!res.ok) {
+    if (statusBox) {
+      statusBox.style.display = 'block';
+      statusBox.className = 'result-box err';
+      statusBox.textContent = `❌ ${res.error}`;
+    }
+    if (startBtn) startBtn.disabled = false;
+    showToast(res.error, 'error');
+    return;
+  }
+
+  iphoneUsbState.streaming = true;
+  updateIphoneUsbUI();
+  showToast('Cámara iPhone conectada por cable USB', 'success');
+
+  if (statusBox) {
+    statusBox.style.display = 'block';
+    statusBox.className = 'result-box ok';
+    statusBox.textContent = '⚡ Transmitiendo en tiempo real por cable USB (usbmuxd). Latencia < 8 ms.';
+  }
+
+  if (useObs) {
+    await window.api.iphoneObsVirtualCam({ start: true });
+  }
+});
+
+$('btnStopIphoneUsb')?.addEventListener('click', async () => {
+  await window.api.iphoneUsbStopStream();
+  iphoneUsbState.streaming = false;
+  updateIphoneUsbUI();
+  const statusBox = $('iphoneUsbStatusMsg');
+  if (statusBox) statusBox.style.display = 'none';
+  showToast('Transmisión USB detenida', 'info');
+});
+
+window.api?.onIphoneUsbDeviceChange?.((data) => {
+  if (data.device) {
+    if (data.connected) {
+      iphoneUsbState.devices = [data.device];
+      showToast('📱 iPhone conectado por cable USB', 'info');
+    } else {
+      iphoneUsbState.devices = [];
+      iphoneUsbState.streaming = false;
+      showToast('iPhone desconectado del cable USB', 'warn');
+    }
+  }
+  updateIphoneUsbUI();
+});
+
+window.api?.onIphoneUsbStats?.((stats) => {
+  const bitrateEl = $('iphoneUsbBitrate');
+  if (bitrateEl) bitrateEl.textContent = `${stats.kbps} kbps`;
+});
+
+// Init iPhone section
+if (window.api?.iphoneToolsStatus) {
+  initIphoneSection();
+}
+if (window.api?.iphoneUsbStatus) {
+  initIphoneConnSelector();
+  refreshIphoneUsbStatus();
+  setInterval(refreshIphoneUsbStatus, 2500);
+}
 
 // ── Init ───────────────────────────────────────────────────────
 (async function init() {

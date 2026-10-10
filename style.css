@@ -1413,3 +1413,195 @@ select:focus-visible {
   font-weight: 500;
 }
 .obs-flow-arrow { color: var(--text-muted); font-size: 14px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   iPhone / AirPlay Section
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Control card header */
+.iphone-control-card { padding: 22px 24px; }
+
+.iphone-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.iphone-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.iphone-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+/* Action buttons */
+.iphone-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.iphone-start-btn,
+.iphone-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.iphone-start-btn {
+  background: linear-gradient(135deg, var(--accent-dark), var(--teal));
+  color: #fff;
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+.iphone-start-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent), var(--teal-dark));
+  box-shadow: 0 6px 20px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.iphone-start-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.iphone-stop-btn {
+  background: rgba(239,68,68,.15);
+  color: #fc8181;
+  border: 1px solid rgba(239,68,68,.3);
+}
+.iphone-stop-btn:hover {
+  background: rgba(239,68,68,.25);
+  border-color: rgba(239,68,68,.5);
+  transform: translateY(-1px);
+}
+
+/* Status message: multiline pre-wrap */
+#iphoneStatusMsg {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  font-size: 0.85rem;
+}
+
+/* Step-by-step list */
+.iphone-steps {
+  margin: 0 0 4px 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  counter-reset: iphone-step;
+  list-style: none;
+}
+.iphone-steps li {
+  counter-increment: iphone-step;
+  position: relative;
+  padding-left: 28px;
+}
+.iphone-steps li::before {
+  content: counter(iphone-step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(61,220,132,.12);
+  border: 1px solid rgba(61,220,132,.3);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.iphone-steps li strong { color: var(--text-primary); font-weight: 600; }
+
+/* Note callout */
+.note {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-dark);
+}
+
+/* Nav badge for iPhone (active pulse) */
+.iphone-badge {
+  background: var(--accent) !important;
+  color: #0b1512 !important;
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ── iPhone mode selector (segmented control) ─────────────────────── */
+.iphone-mode-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 5px;
+}
+
+.iphone-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.iphone-mode-btn svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity var(--transition);
+}
+
+.iphone-mode-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.iphone-mode-btn:hover svg { opacity: 1; }
+
+.iphone-mode-btn.active {
+  background: linear-gradient(135deg, rgba(61,220,132,.14) 0%, rgba(61,220,132,.06) 100%);
+  border-color: rgba(61,220,132,.25);
+  color: var(--accent-light);
+  font-weight: 600;
+}
+.iphone-mode-btn.active svg { opacity: 1; stroke: var(--accent); }

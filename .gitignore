@@ -10,3 +10,8 @@ Thumbs.db
 # Binarios de scrcpy (usar npm run vendor:sync)
 vendor/scrcpy/**
 !vendor/scrcpy/.gitkeep
+
+# Binarios de uxplay
+vendor/uxplay/**
+!vendor/uxplay/.gitkeep
+

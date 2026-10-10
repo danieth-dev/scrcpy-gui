@@ -60,6 +60,17 @@
           <span class="nav-label">Ajustes</span>
         </li>
 
+        <li class="nav-item" data-section="iphone" id="navIphone">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="7" y="2" width="10" height="20" rx="2"/>
+              <circle cx="12" cy="18" r="0.8" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <span class="nav-label">iPhone</span>
+          <span class="nav-badge iphone-badge" id="iphoneNavBadge" style="display:none">▶</span>
+        </li>
+
       </ul>
 
       <div class="sidebar-footer">
@@ -371,7 +382,6 @@
               </div>
             </label>
           </div>
-        </div>
 
           <div class="card settings-card" style="grid-column: 1 / -1;">
             <h3>Acerca de y actualizaciones</h3>
@@ -388,6 +398,205 @@
         <div class="settings-actions">
           <button class="btn-secondary" id="btnResetSettings">Restablecer defaults</button>
           <button class="btn-primary" id="btnSaveSettings">Guardar ajustes</button>
+        </div>
+      </section>
+
+      <!-- ── IPHONE / AIRPLAY SECTION ─────────────────────────── -->
+      <section class="section" id="section-iphone">
+        <div class="section-header">
+          <h1>iPhone / iPad</h1>
+          <p>Usa tu iPhone como cámara o webcam nativa · AirPlay → OBS Virtual Camera</p>
+        </div>
+
+        <!-- Tool alerts -->
+        <div id="uxplayMissingAlert" class="result-box warn" style="display:none; margin-bottom:14px; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span>⚠ <strong>UxPlay no encontrado.</strong> Es necesario para recibir AirPlay del iPhone.</span>
+          <button class="btn-text" id="btnGetUxPlay" style="white-space:nowrap">Descargar UxPlay →</button>
+        </div>
+        <div id="obsMissingAlert" class="result-box" style="display:none; margin-bottom:14px; align-items:center; gap:10px; flex-wrap:wrap; border-color:rgba(255,180,0,0.25); background:rgba(255,180,0,0.07);">
+          <span>💡 <strong>OBS Studio no encontrado.</strong> Sin OBS, el iPhone se verá en ventana pero no como webcam en Zoom/Teams.</span>
+          <button class="btn-text" id="btnGetObs" style="white-space:nowrap">Descargar OBS →</button>
+        </div>
+
+        <!-- Selector de Conexión: Cable USB vs AirPlay Wi-Fi -->
+        <div class="iphone-mode-selector" id="iphoneConnSelector" style="margin-bottom: 16px;">
+          <button class="iphone-mode-btn active" id="connBtnUsb" data-conn="usb">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v6m0 0l-3-3m3 3l3-3M6 8v3a6 6 0 0 0 12 0V8"/>
+              <rect x="9" y="14" width="6" height="7" rx="1"/>
+            </svg>
+            Cable USB (Cero Latencia)
+          </button>
+          <button class="iphone-mode-btn" id="connBtnAirplay" data-conn="airplay">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><polygon points="12 18 8 22 16 22 12 18" fill="currentColor"/>
+            </svg>
+            AirPlay (Wi-Fi)
+          </button>
+        </div>
+
+        <!-- ── PANEL CABLE USB DIRECTO (usbmuxd) ────────────────── -->
+        <div id="iphoneUsbSection">
+          <div class="card settings-card iphone-control-card">
+            <div class="iphone-header-row">
+              <div>
+                <div class="iphone-title">Cámara por Cable USB</div>
+                <div class="iphone-subtitle" id="iphoneUsbSubtitle">Túnel físico usbmuxd · 1080p / 60 fps · Latencia ultra baja (&lt;10 ms)</div>
+              </div>
+              <span class="status-pill" id="iphoneUsbBadge">Buscando iPhone…</span>
+            </div>
+
+            <div class="settings-group" style="margin-top:18px;">
+              <div class="device-status-row" id="iphoneUsbDeviceInfo" style="display:flex; align-items:center; gap:12px; padding:12px 16px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:var(--radius-sm); margin-bottom:14px;">
+                <span style="font-size:20px;">📱</span>
+                <div>
+                  <div style="font-size:13.5px; font-weight:600; color:var(--text-primary);" id="iphoneUsbDeviceName">Buscando iPhone conectado por USB…</div>
+                  <div style="font-size:12px; color:var(--text-secondary);" id="iphoneUsbDeviceSerial">Conecta tu iPhone por cable USB a la PC</div>
+                </div>
+              </div>
+
+              <!-- Selector de calidad USB -->
+              <label class="setting-row">
+                <span class="setting-label">Calidad de video</span>
+                <div class="setting-control">
+                  <select id="iphoneUsbQuality" class="small-select">
+                    <option value="1080p" selected>Máxima — 1080p / 60 fps (10 Mbps)</option>
+                    <option value="4k">Ultra HD — 4K / 60 fps (25 Mbps)</option>
+                    <option value="720p">Rendimiento — 720p / 60 fps (6 Mbps)</option>
+                  </select>
+                </div>
+              </label>
+
+              <!-- OBS toggle USB -->
+              <label class="toggle-row" style="margin-top:14px;">
+                <span class="setting-label">Usar OBS Virtual Camera (webcam nativa)</span>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="iphoneUsbUseObs" />
+                  <span class="toggle-slider"></span>
+                </div>
+              </label>
+            </div>
+
+            <div class="iphone-actions" style="margin-top:22px;">
+              <button id="btnStartIphoneUsb" class="btn-primary iphone-start-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span id="btnStartIphoneUsbLabel">Iniciar Cámara USB</span>
+              </button>
+              <button id="btnStopIphoneUsb" class="btn-stop iphone-stop-btn" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Detener
+              </button>
+            </div>
+
+            <!-- Estadísticas en vivo de streaming USB -->
+            <div id="iphoneUsbLiveStats" style="display:none; margin-top:14px; padding:10px 14px; background:rgba(61,220,132,0.06); border:1px solid rgba(61,220,132,0.2); border-radius:var(--radius-sm); font-size:12.5px; color:var(--text-secondary); display:flex; justify-content:space-between; align-items:center;">
+              <span>⚡ <strong style="color:var(--accent);">Transmitiendo por cable:</strong> <span id="iphoneUsbBitrate">0 kbps</span></span>
+              <span>Latencia: <strong style="color:var(--accent);">&lt;8 ms</strong></span>
+            </div>
+
+            <div id="iphoneUsbStatusMsg" class="result-box" style="display:none; margin-top:16px;"></div>
+          </div>
+
+          <!-- Instrucciones de uso del modo USB -->
+          <div class="card settings-card" style="margin-top:16px;">
+            <h3 style="margin:0 0 16px; font-size:0.95rem; color:var(--text-primary); letter-spacing:0.02em;">🔌 Cómo usar la Cámara por Cable USB</h3>
+            <ol class="iphone-steps">
+              <li>Conecta tu iPhone a este PC con el <strong>cable USB</strong>.</li>
+              <li>Abre la app <strong>scrcpy Cam</strong> en tu iPhone.</li>
+              <li>Pulsa <strong>"Iniciar Cámara USB"</strong> arriba.</li>
+              <li>En tu iPhone, toca el botón <strong>"Apagar"</strong> para apagar la pantalla y ahorrar 100% de batería sin que el teléfono caliente.</li>
+            </ol>
+            <div class="note" style="margin-top:12px;">
+              💡 <strong>Instalar la app en iPhone:</strong> Puedes instalar la app en tu iPhone fácilmente desde Windows usando Sideloadly (ver carpeta <code>ios/ScrcpyCam</code>).
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PANEL AIRPLAY WI-FI ──────────────────────────────── -->
+        <div id="iphoneAirplaySection" style="display:none;">
+          <!-- Modo selector: Pantalla completa vs Solo Cámara -->
+          <div class="iphone-mode-selector" id="iphoneModeSelector">
+            <button class="iphone-mode-btn active" id="modeBtnScreen" data-mode="screen">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="22" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              Pantalla completa
+            </button>
+            <button class="iphone-mode-btn" id="modeBtnCamera" data-mode="camera">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              Solo Cámara
+            </button>
+          </div>
+
+          <!-- Control principal AirPlay -->
+          <div class="card settings-card iphone-control-card">
+            <div class="iphone-header-row">
+              <div>
+                <div class="iphone-title" id="iphoneCardTitle">Receptor AirPlay</div>
+                <div class="iphone-subtitle" id="iphoneCardSubtitle">El iPhone transmite su pantalla a este PC vía Wi-Fi</div>
+              </div>
+              <span class="status-pill" id="iphoneBadge">Inactivo</span>
+            </div>
+
+            <div class="settings-group" style="margin-top:18px;">
+              <label class="setting-row">
+                <span class="setting-label">Nombre AirPlay</span>
+                <div class="setting-control">
+                  <input id="iphoneName" type="text" class="input-field small-select" value="scrcpy GUI"
+                         placeholder="Nombre que verá tu iPhone" style="min-width:180px;" />
+                </div>
+              </label>
+
+              <!-- Calidad -->
+              <label class="setting-row" style="margin-top:12px;">
+                <span class="setting-label">Calidad de video</span>
+                <div class="setting-control">
+                  <select id="iphoneQuality" class="small-select">
+                    <option value="max" selected>Máxima — 1080p / 60 fps</option>
+                    <option value="high">Alta — 1080p / 30 fps</option>
+                    <option value="medium">Media — 720p / 30 fps</option>
+                  </select>
+                </div>
+              </label>
+
+              <!-- OBS toggle -->
+              <label class="toggle-row" style="margin-top:14px;">
+                <span class="setting-label">Usar OBS Virtual Camera (webcam nativa)</span>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="iphoneUseObs" />
+                  <span class="toggle-slider"></span>
+                </div>
+              </label>
+            </div>
+
+            <div class="iphone-actions" style="margin-top:22px;">
+              <button id="btnStartIphone" class="btn-primary iphone-start-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span id="btnStartIphoneLabel">Iniciar como Webcam</span>
+              </button>
+              <button id="btnStopIphone" class="btn-stop iphone-stop-btn" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Detener
+              </button>
+            </div>
+
+            <div id="iphoneStatusMsg" class="result-box" style="display:none; margin-top:16px;"></div>
+          </div>
+
+          <!-- Instrucciones AirPlay paso a paso -->
+          <div class="card settings-card" style="margin-top:16px;">
+            <h3 style="margin:0 0 16px; font-size:0.95rem; color:var(--text-primary); letter-spacing:0.02em;" id="iphoneStepsTitle">📱 Cómo conectar tu iPhone por Wi-Fi</h3>
+            <ol class="iphone-steps" id="stepsScreen">
+              <li>Asegúrate de que iPhone y este PC están en la <strong>misma red Wi-Fi</strong>.</li>
+              <li>Pulsa <strong>"Iniciar como Webcam"</strong> arriba.</li>
+              <li>En el iPhone: desliza hacia abajo → abre el <strong>Centro de Control</strong>.</li>
+              <li>Toca el ícono de <strong>Duplicar pantalla</strong> y selecciona <strong id="iphoneNameHint">"scrcpy GUI"</strong>.</li>
+            </ol>
+            <ol class="iphone-steps" id="stepsCamera" style="display:none;">
+              <li>Asegúrate de que iPhone y este PC están en la <strong>misma red Wi-Fi</strong>.</li>
+              <li>Abre la <strong>app Cámara</strong> en tu iPhone.</li>
+              <li>Pulsa <strong>"Iniciar Cámara"</strong> arriba.</li>
+              <li>En el iPhone: abre el <strong>Centro de Control</strong> y toca <strong>Duplicar pantalla</strong>.</li>
+            </ol>
+          </div>
         </div>
       </section>
 

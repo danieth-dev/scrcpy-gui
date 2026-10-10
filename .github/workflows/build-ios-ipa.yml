@@ -1,0 +1,50 @@
+name: Build ScrcpyCam iOS (.ipa)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ios-ipa.yml'
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup iOS compilation
+        run: |
+          mkdir -p build/Payload/ScrcpyCam.app
+          
+          echo "Compilando Swift para arquitectura arm64 de iOS..."
+          xcrun --sdk iphoneos swiftc \
+            -target arm64-apple-ios15.0 \
+            -sdk $(xcrun --sdk iphoneos --show-sdk-path) \
+            -framework SwiftUI \
+            -framework AVFoundation \
+            -framework VideoToolbox \
+            -framework Network \
+            -framework UIKit \
+            ios/ScrcpyCam/CameraManager.swift \
+            ios/ScrcpyCam/H264Encoder.swift \
+            ios/ScrcpyCam/USBServer.swift \
+            ios/ScrcpyCam/ContentView.swift \
+            ios/ScrcpyCam/ScrcpyCamApp.swift \
+            -o build/Payload/ScrcpyCam.app/ScrcpyCam
+
+          cp ios/ScrcpyCam/Info.plist build/Payload/ScrcpyCam.app/Info.plist
+
+          echo "Creando paquete ScrcpyCam.ipa..."
+          cd build
+          zip -r ScrcpyCam.ipa Payload
+
+      - name: Upload ScrcpyCam.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScrcpyCam-ipa
+          path: build/ScrcpyCam.ipa

@@ -3,8 +3,17 @@ const path = require('path');
 const { exec, spawn, execSync } = require('child_process');
 const fs = require('fs');
 
+process.on('uncaughtException', (err) => {
+  console.error('[Main process uncaughtException]', err);
+});
+
 let mainWindow;
 let activeScrcpyProcesses = {};
+
+// ── iPhone / UxPlay ──────────────────────────────────────────────
+let activeUxPlayProcess = null;
+let UXPLAY = null;
+let OBS_PATH = null;
 
 // ─── Tool discovery ──────────────────────────────────────────────────────────
 
@@ -141,11 +150,15 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     Object.values(activeScrcpyProcesses).forEach(p => { try { p.kill(); } catch (_) {} });
+    if (activeUxPlayProcess) { try { activeUxPlayProcess.kill(); } catch (_) {} activeUxPlayProcess = null; }
     mainWindow = null;
   });
 }
 
-app.disableHardwareAcceleration();
+// Force software rendering on Windows to prevent GPU crash / black screen
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('no-sandbox');
 app.whenReady().then(() => {
   SCRCPY = findScrcpy();
   ADB = findAdb();
@@ -404,6 +417,12 @@ ipcMain.handle('scrcpy:launch', async (_, { serial, options }) => {
       windowsHide: true,
     });
 
+    proc.on('error', (err) => {
+      console.error('[scrcpy process error]', err);
+      delete activeScrcpyProcesses[serial];
+      mainWindow?.webContents.send('scrcpy:stopped', { serial, error: err.message, earlyFail: true });
+    });
+
     proc.stderr?.on('data', (d) => { stderrBuf += d.toString(); });
     proc.stdout?.on('data', (d) => { stdoutBuf += d.toString(); });
 
@@ -471,3 +490,273 @@ ipcMain.handle('adb:screenshot', async (_, { serial }) => {
     return { ok: false, error: e.message };
   }
 });
+
+// ─── iPhone / AirPlay (UxPlay + OBS) ─────────────────────────────────────────
+
+function findUxPlay() {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'uxplay', 'uxplay-windows.exe') : null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'uxplay', 'uxplay.exe') : null,
+    path.join(__dirname, 'vendor', 'uxplay', 'uxplay-windows.exe'),
+    path.join(__dirname, 'vendor', 'uxplay', 'uxplay.exe'),
+    path.join(path.dirname(process.execPath || __dirname), 'uxplay', 'uxplay-windows.exe'),
+    path.join(path.dirname(process.execPath || __dirname), 'uxplay', 'uxplay.exe'),
+    'uxplay-windows.exe',
+    'uxplay.exe',
+    'uxplay',
+  ].filter(Boolean);
+  for (const c of candidates) {
+    try {
+      if (c.includes('\\') || c.includes('/')) {
+        if (fs.existsSync(c)) return c;
+        continue;
+      }
+      // For PATH lookup, check if which/where finds it
+      execSync(`where "${c}"`, { stdio: 'ignore', timeout: 2000 });
+      return c;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function findObs() {
+  const candidates = [
+    'C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe',
+    'C:\\Program Files (x86)\\obs-studio\\bin\\64bit\\obs64.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'obs-studio', 'bin', '64bit', 'obs64.exe'),
+    path.join(process.env.ProgramFiles  || '', 'obs-studio', 'bin', '64bit', 'obs64.exe'),
+  ];
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch (_) {}
+  }
+  return null;
+}
+
+ipcMain.handle('iphone:toolsStatus', () => {
+  UXPLAY   = UXPLAY   || findUxPlay();
+  OBS_PATH = OBS_PATH || findObs();
+  return {
+    uxplay: !!UXPLAY,
+    obs:    !!OBS_PATH,
+    uxplayPath: UXPLAY,
+    obsPath:    OBS_PATH,
+    running: !!activeUxPlayProcess,
+  };
+});
+
+ipcMain.handle('iphone:startUxPlay', async (_, { name = 'scrcpy GUI', fps = 60, res = '1920x1080@60', cameraMode = false } = {}) => {
+  UXPLAY = UXPLAY || findUxPlay();
+  if (!UXPLAY) return { ok: false, error: 'UxPlay no encontrado. Descárgalo en https://github.com/leapbtw/uxplay-windows/releases y colócalo en gui/vendor/uxplay/' };
+  if (activeUxPlayProcess) return { ok: true, message: 'Ya está corriendo', pid: activeUxPlayProcess.pid };
+  try {
+    // Build args: name, max quality, optional rotation for camera portrait mode
+    const args = ['-n', name, '-fps', String(fps), '-s', res];
+    if (cameraMode) {
+      // Portrait orientation — UxPlay rotates to show camera properly
+      args.push('-p');
+    }
+    const proc = spawn(UXPLAY, args, {
+      cwd: path.dirname(UXPLAY),
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: false,
+    });
+    activeUxPlayProcess = proc;
+    proc.on('error', (err) => {
+      console.error('[UxPlay process error]', err);
+      activeUxPlayProcess = null;
+      mainWindow?.webContents.send('iphone:uxplayStopped', { error: err.message });
+    });
+    proc.once('exit', () => {
+      activeUxPlayProcess = null;
+      mainWindow?.webContents.send('iphone:uxplayStopped', {});
+    });
+    return { ok: true, pid: proc.pid };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('iphone:stopUxPlay', async () => {
+  if (activeUxPlayProcess) {
+    try { activeUxPlayProcess.kill(); } catch (_) {}
+    activeUxPlayProcess = null;
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('iphone:obsVirtualCam', async (_, { start = true } = {}) => {
+  OBS_PATH = OBS_PATH || findObs();
+
+  // Try OBS WebSocket v5 (built-in OBS >= 28, port 4455, no password)
+  try {
+    const net = require('net');
+    const wsAvailable = await new Promise(res => {
+      const s = net.createConnection({ port: 4455, host: '127.0.0.1' }, () => { s.destroy(); res(true); });
+      s.on('error', () => res(false));
+      setTimeout(() => { try { s.destroy(); } catch(_){} res(false); }, 1500);
+    });
+
+    if (wsAvailable) {
+      const WebSocket = require('ws');
+      const result = await new Promise((resolve) => {
+        const ws = new WebSocket('ws://127.0.0.1:4455');
+        const timer = setTimeout(() => { try { ws.close(); } catch(_){} resolve({ ok: false, error: 'Timeout OBS WebSocket' }); }, 5000);
+        ws.on('message', (raw) => {
+          try {
+            const msg = JSON.parse(raw.toString());
+            if (msg.op === 0) {
+              // Hello — send Identify (no auth)
+              ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1 } }));
+            } else if (msg.op === 2) {
+              // Identified — send request
+              const requestType = start ? 'StartVirtualCam' : 'StopVirtualCam';
+              ws.send(JSON.stringify({ op: 6, d: { requestType, requestId: 'vcam-1', requestData: {} } }));
+            } else if (msg.op === 7) {
+              // RequestResponse
+              clearTimeout(timer);
+              try { ws.close(); } catch(_){}
+              const ok = msg.d?.requestStatus?.result !== false;
+              resolve({ ok, message: ok ? (start ? 'Virtual Camera iniciada' : 'Virtual Camera detenida') : (msg.d?.requestStatus?.comment || 'Error OBS') });
+            }
+          } catch (_) {}
+        });
+        ws.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'OBS WebSocket: ' + e.message }); });
+      });
+      if (result.ok) return result;
+      // Fall through to CLI launch
+    }
+  } catch (_) {}
+
+  // Fallback: launch OBS with --startvirtualcam
+  if (!start) {
+    return { ok: true, message: 'OBS WebSocket no conectado' };
+  }
+  if (!OBS_PATH) return { ok: false, error: 'OBS Studio no encontrado. Instálalo en https://obsproject.com/download' };
+  try {
+    const dir = path.dirname(OBS_PATH);
+    const cmd = `cmd.exe /c start "" /D "${dir}" "${OBS_PATH}" --startvirtualcam --minimize-to-tray`;
+    await new Promise((resolve) => {
+      exec(cmd, { windowsHide: true }, (err) => {
+        if (err) {
+          console.error('[OBS launch fallback error]', err);
+          resolve({ ok: false, error: err.message });
+        } else {
+          resolve({ ok: true });
+        }
+      });
+    });
+    return { ok: true, message: 'OBS lanzado con Virtual Camera (modo fallback). Puede tardar unos segundos.', fallback: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// ─── iPhone / USB Direct Camera (usbmuxd) ──────────────────────────────────
+const { UsbmuxClient } = require('./scripts/usbmuxClient');
+const usbmux = new UsbmuxClient();
+usbmux.startListening();
+
+let activeUsbStreamSocket = null;
+let usbTunnelServer = null;
+
+usbmux.on('attached', (dev) => {
+  mainWindow?.webContents.send('iphone:usbDeviceChange', { connected: true, device: dev });
+});
+
+usbmux.on('detached', (dev) => {
+  if (activeUsbStreamSocket) {
+    try { activeUsbStreamSocket.destroy(); } catch (_) {}
+    activeUsbStreamSocket = null;
+  }
+  mainWindow?.webContents.send('iphone:usbDeviceChange', { connected: false, device: dev });
+});
+
+ipcMain.handle('iphone:usbStatus', () => {
+  return {
+    ok: true,
+    devices: usbmux.getConnectedDevices(),
+    streaming: !!activeUsbStreamSocket,
+  };
+});
+
+ipcMain.handle('iphone:usbStartStream', async (_, { port = 50005 } = {}) => {
+  const devices = usbmux.getConnectedDevices();
+  if (!devices || devices.length === 0) {
+    return { ok: false, error: 'No se detecta ningún iPhone conectado por cable USB. Conecta el cable e inténtalo de nuevo.' };
+  }
+
+  const targetDev = devices[0];
+
+  try {
+    // Si ya existe un túnel, cerrarlo
+    if (activeUsbStreamSocket) {
+      try { activeUsbStreamSocket.destroy(); } catch (_) {}
+      activeUsbStreamSocket = null;
+    }
+
+    // Levantar proxy local si no está activo para permitir a OBS / reproductores locales leer el stream
+    if (!usbTunnelServer) {
+      try {
+        usbTunnelServer = await usbmux.createPortForwarder(port, port, targetDev.deviceId);
+      } catch (_) {
+        // Puerto puede estar ocupado, continuar con socket directo
+      }
+    }
+
+    const socket = await usbmux.connectToDevice(targetDev.deviceId, port);
+    activeUsbStreamSocket = socket;
+
+    let totalBytes = 0;
+    let lastTime = Date.now();
+
+    socket.on('data', (chunk) => {
+      totalBytes += chunk.length;
+      mainWindow?.webContents.send('iphone:usbVideoData', chunk);
+
+      const now = Date.now();
+      if (now - lastTime >= 1000) {
+        const kbps = Math.round((totalBytes * 8) / ((now - lastTime) / 1000) / 1024);
+        mainWindow?.webContents.send('iphone:usbStats', { kbps, bytes: totalBytes });
+        totalBytes = 0;
+        lastTime = now;
+      }
+    });
+
+    socket.on('close', () => {
+      activeUsbStreamSocket = null;
+      mainWindow?.webContents.send('iphone:usbDeviceChange', { streaming: false });
+    });
+
+    socket.on('error', (err) => {
+      console.error('[usbmux stream error]', err.message);
+      activeUsbStreamSocket = null;
+    });
+
+    return {
+      ok: true,
+      deviceId: targetDev.deviceId,
+      serial: targetDev.serial,
+      port,
+      message: 'Túnel por cable USB establecido con éxito.',
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `No se pudo conectar a la app en el iPhone por USB: ${err.message}. Asegúrate de que la app scrcpy Cam esté abierta en el iPhone.`,
+    };
+  }
+});
+
+ipcMain.handle('iphone:usbStopStream', async () => {
+  if (activeUsbStreamSocket) {
+    try { activeUsbStreamSocket.destroy(); } catch (_) {}
+    activeUsbStreamSocket = null;
+  }
+  if (usbTunnelServer) {
+    try { usbTunnelServer.close(); } catch (_) {}
+    usbTunnelServer = null;
+  }
+  return { ok: true };
+});
+

@@ -30,7 +30,16 @@
       {
         "from": "vendor/scrcpy",
         "to": "scrcpy",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/uxplay",
+        "to": "uxplay",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "publish": [
@@ -43,7 +52,7 @@
     ]
   },
   "devDependencies": {
-    "electron": "^32.0.0",
+    "electron": "^44.7.0",
     "electron-builder": "^26.15.3"
   },
   "author": {
@@ -58,5 +67,8 @@
     "webcam",
     "adb",
     "electron"
-  ]
+  ],
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
 }
