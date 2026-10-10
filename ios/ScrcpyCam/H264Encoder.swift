@@ -27,7 +27,7 @@ class H264Encoder {
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
             imageBufferAttributes: nil,
-            mCompressedDataAllocator: nil,
+            compressedDataAllocator: nil,
             outputCallback: callback,
             refcon: Unmanaged.passUnretained(self).toOpaque(),
             compressionSessionOut: &session

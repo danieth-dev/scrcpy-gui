@@ -13,6 +13,8 @@ on:
 jobs:
   build-ipa:
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,3 +65,15 @@ jobs:
         with:
           name: ScrcpyCam-ipa
           path: build/ScrcpyCam.ipa
+
+      - name: Publish Public Release
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: ios-v1.0
+          name: ScrcpyCam iOS v1.0 (.ipa)
+          body: |
+            Descarga `ScrcpyCam.ipa` e instálalo en tu iPhone usando Sideloadly para streaming directo por cable USB (0 latencia, modo pantalla apagada OLED).
+          files: build/ScrcpyCam.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
