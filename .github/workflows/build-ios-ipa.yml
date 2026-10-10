@@ -23,6 +23,7 @@ jobs:
           
           echo "Compilando Swift para arquitectura arm64 de iOS..."
           xcrun --sdk iphoneos swiftc \
+            -parse-as-library \
             -target arm64-apple-ios15.0 \
             -sdk $(xcrun --sdk iphoneos --show-sdk-path) \
             -framework SwiftUI \
@@ -38,6 +39,9 @@ jobs:
             -o build/Payload/ScrcpyCam.app/ScrcpyCam
 
           cp ios/ScrcpyCam/Info.plist build/Payload/ScrcpyCam.app/Info.plist
+
+          echo "Firmando paquete ad-hoc..."
+          codesign --force --deep --sign - build/Payload/ScrcpyCam.app
 
           echo "Creando paquete ScrcpyCam.ipa..."
           cd build
