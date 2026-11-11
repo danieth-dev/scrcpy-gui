@@ -126,7 +126,8 @@ pub fn run() {
             vcam_start,
             vcam_stop,
             vcam_install_driver,
-            device_profile
+            device_profile,
+            apply_settings
         ])
 
         .run(tauri::generate_context!())

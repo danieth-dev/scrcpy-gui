@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use crate::adb::{adb_quiet, is_ip_serial, is_valid_serial};
-use crate::profile::{self, ProfileRequest, ResolvedProfile, Target};
+use crate::profile::{self, ProfileRequest, ResolvedProfile, ScreenProfile, ScreenRequest, Target};
 use crate::tools::find_scrcpy;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -38,9 +38,82 @@ pub struct ScrcpyOptions {
     pub bitrate: Option<u32>,
     pub codec: Option<String>,
     pub orientation: Option<String>,
+    /// "Ver pantalla": lado corto deseado (720, 1080…); 0 = nativa.
+    #[serde(rename = "screenRes")]
+    pub screen_res: Option<u32>,
+    /// "Ver pantalla": fps deseados (≤ refresco de la pantalla).
+    #[serde(rename = "screenFps")]
+    pub screen_fps: Option<u32>,
+    /// "max" = lo mejor que dé el teléfono; "custom" = lo elegido.
+    pub quality: Option<String>,
     /// Nivel de protección térmica (lo fija el backend, no la UI).
     #[serde(default, skip_deserializing)]
     pub throttle: Option<u8>,
+    /// Posición y tamaño (x, y, ancho, alto) de la ventana al relanzar, para
+    /// que no salte de sitio (lo fija el backend).
+    #[serde(default, skip_deserializing)]
+    pub window_geometry: Option<(i32, i32, u32, u32)>,
+}
+
+impl ScrcpyOptions {
+    /// Petición de perfil de cámara equivalente a estos ajustes.
+    pub fn profile_request(&self) -> ProfileRequest {
+        ProfileRequest {
+            facing: self.camera_facing.clone(),
+            max_size: self.max_size,
+            fps: self.max_fps,
+            codec: self.codec.clone(),
+            bitrate: self.bitrate,
+            zoom: self.camera_zoom,
+            torch: self.camera_torch,
+            orientation: self.orientation.clone(),
+            throttle: self.throttle,
+            quality: self.quality.clone(),
+            wifi: false,
+        }
+    }
+
+    /// Petición de "Ver pantalla" equivalente a estos ajustes.
+    pub fn screen_request(&self) -> ScreenRequest {
+        ScreenRequest {
+            res: self.screen_res,
+            fps: self.screen_fps,
+            codec: self.codec.clone(),
+            bitrate: self.bitrate,
+            quality: self.quality.clone(),
+            wifi: false,
+        }
+    }
+
+    /// Copia los ajustes de la pestaña Ajustes, conservando el modo de la
+    /// sesión (título, cámara/pantalla) y su geometría.
+    pub fn with_settings_from(&self, new: &ScrcpyOptions) -> ScrcpyOptions {
+        let mut o = self.clone();
+        o.camera_facing = new.camera_facing.clone();
+        o.max_fps = new.max_fps;
+        o.max_size = new.max_size;
+        o.camera_zoom = new.camera_zoom;
+        o.camera_torch = new.camera_torch;
+        o.no_audio = new.no_audio;
+        o.stay_awake = new.stay_awake;
+        o.screen_off = new.screen_off;
+        o.bitrate = new.bitrate;
+        o.codec = new.codec.clone();
+        o.orientation = new.orientation.clone();
+        o.screen_res = new.screen_res;
+        o.screen_fps = new.screen_fps;
+        o.quality = new.quality.clone();
+        o
+    }
+
+    /// ¿Cambia algo de "Ver pantalla" que no sea la imagen? (la imagen se
+    /// compara con `ScreenProfile::differs`)
+    pub fn mirror_differs(&self, other: &ScrcpyOptions) -> bool {
+        self.orientation.as_deref().unwrap_or("0") != other.orientation.as_deref().unwrap_or("0")
+            || self.no_audio != other.no_audio
+            || self.stay_awake != other.stay_awake
+            || self.screen_off != other.screen_off
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -48,6 +121,9 @@ pub struct LaunchResult {
     /// Configuración de cámara realmente aplicada (sólo modo cámara).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<ResolvedProfile>,
+    /// Configuración de pantalla realmente aplicada (sólo "Ver pantalla").
+    #[serde(rename = "screenProfile", skip_serializing_if = "Option::is_none")]
+    pub screen_profile: Option<ScreenProfile>,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -120,6 +196,26 @@ impl ScrcpyManager {
         lock.keys().cloned().collect()
     }
 
+    /// Relanza la sesión de ese teléfono con otros ajustes, manteniendo la
+    /// ventana donde estaba y con el mismo tamaño.
+    pub async fn relaunch_with(&self, app: AppHandle, serial: String, mut options: ScrcpyOptions) -> LaunchResult {
+        let pid = {
+            let lock = self.sessions.lock().await;
+            lock.get(&serial).and_then(|s| s.child.id())
+        };
+        options.window_geometry = match pid {
+            Some(pid) => tokio::task::spawn_blocking(move || window_rect(pid)).await.ok().flatten(),
+            None => None,
+        };
+        self.launch(app, serial, options).await
+    }
+
+    /// Todas las sesiones activas con sus ajustes.
+    pub async fn all_sessions(&self) -> Vec<(String, ScrcpyOptions)> {
+        let lock = self.sessions.lock().await;
+        lock.iter().map(|(k, v)| (k.clone(), v.options.clone())).collect()
+    }
+
     /// Ajustes de la sesión activa en ese teléfono, si la hay.
     pub async fn session_options(&self, serial: &str) -> Option<ScrcpyOptions> {
         self.sessions.lock().await.get(serial).map(|s| s.options.clone())
@@ -147,13 +243,14 @@ impl ScrcpyManager {
         options: ScrcpyOptions,
     ) -> LaunchResult {
         if !is_valid_serial(&serial) {
-            return LaunchResult { profile: None, ok: false, pid: None, error: Some("Serial no válido".into()) };
+            return LaunchResult { profile: None, screen_profile: None, ok: false, pid: None, error: Some("Serial no válido".into()) };
         }
 
         let scrcpy_path = match find_scrcpy() {
             Some(p) => p,
             None => return LaunchResult {
                 profile: None,
+                screen_profile: None,
                 ok: false,
                 pid: None,
                 error: Some("scrcpy.exe no encontrado en vendor/scrcpy/ ni en PATH".into()),
@@ -177,25 +274,22 @@ impl ScrcpyManager {
             "-s".to_string(),
             serial.clone(),
             "--window-title".to_string(),
-            options.window_title.unwrap_or_else(|| "scrcpy".to_string()),
+            options.window_title.clone().unwrap_or_else(|| "scrcpy".to_string()),
         ];
+        if let Some((x, y, w, h)) = options.window_geometry {
+            args.push(format!("--window-x={x}"));
+            args.push(format!("--window-y={y}"));
+            args.push(format!("--window-width={w}"));
+            args.push(format!("--window-height={h}"));
+        }
 
         let mut applied_profile: Option<ResolvedProfile> = None;
+        let mut applied_screen: Option<ScreenProfile> = None;
         let camera_only = options.camera_only.unwrap_or(false);
         if camera_only {
             // Mismo resolvedor que la cámara virtual: ajustes de la UI ->
             // configuración que el teléfono soporta de verdad.
-            let req = ProfileRequest {
-                facing: options.camera_facing.clone(),
-                max_size: options.max_size,
-                fps: options.max_fps,
-                codec: options.codec.clone(),
-                bitrate: options.bitrate,
-                zoom: options.camera_zoom,
-                torch: options.camera_torch,
-                orientation: options.orientation.clone(),
-                throttle: options.throttle,
-            };
+            let req = options.profile_request();
             let p = profile::resolve_for(&serial, &req, Target::Window).await;
             args.push("--video-source=camera".to_string());
             args.push("--no-audio".to_string());
@@ -233,24 +327,19 @@ impl ScrcpyManager {
             if options.screen_off.unwrap_or(false) {
                 args.push("--turn-screen-off".to_string());
             }
-            if let Some(fps) = options.max_fps {
-                args.push("--max-fps".to_string());
-                args.push(fps.to_string());
+            // Imagen adaptada a la pantalla de este teléfono (resolución por
+            // lado corto, fps ≤ refresco, códec por hardware).
+            let sp = profile::resolve_screen_for(&serial, &options.screen_request()).await;
+            if sp.max_size > 0 {
+                args.push(format!("--max-size={}", sp.max_size));
             }
-            if let Some(size) = options.max_size {
-                args.push("--max-size".to_string());
-                args.push(size.to_string());
+            args.push(format!("--max-fps={}", sp.fps));
+            args.push(format!("--video-codec={}", sp.codec));
+            if let Some(enc) = &sp.encoder {
+                args.push(format!("--video-encoder={enc}"));
             }
-            if let Some(br) = options.bitrate {
-                args.push("--video-bit-rate".to_string());
-                args.push(format!("{br}M"));
-            }
-            if let Some(c) = options.codec {
-                if !c.is_empty() {
-                    args.push("--video-codec".to_string());
-                    args.push(c);
-                }
-            }
+            args.push(format!("--video-bit-rate={}M", sp.bitrate_mbps));
+            applied_screen = Some(sp);
 
         }
 
@@ -290,6 +379,7 @@ impl ScrcpyManager {
             Ok(c) => c,
             Err(e) => return LaunchResult {
                 profile: None,
+                screen_profile: None,
                 ok: false,
                 pid: None,
                 error: Some(format!("Error al iniciar scrcpy: {e}")),
@@ -445,6 +535,7 @@ impl ScrcpyManager {
                         let log = log_buffer.lock().await.clone();
                         return LaunchResult {
                             profile: None,
+                            screen_profile: None,
                             ok: false,
                             pid: None,
                             error: Some(if log.trim().is_empty() {
@@ -460,6 +551,7 @@ impl ScrcpyManager {
 
         LaunchResult {
             profile: applied_profile,
+            screen_profile: applied_screen,
             ok: true,
             pid: Some(pid),
             error: None,
@@ -538,4 +630,77 @@ async fn reconnect_task(app: AppHandle, serial: String, options: ScrcpyOptions, 
             early_fail: false,
         },
     );
+}
+
+// ── Geometría de la ventana de scrcpy (Win32) ─────────────────────────────
+
+#[repr(C)]
+#[derive(Default)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+type Hwnd = *mut std::ffi::c_void;
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn EnumWindows(cb: unsafe extern "system" fn(Hwnd, isize) -> i32, lparam: isize) -> i32;
+    fn GetWindowThreadProcessId(hwnd: Hwnd, pid: *mut u32) -> u32;
+    fn IsWindowVisible(hwnd: Hwnd) -> i32;
+    fn IsIconic(hwnd: Hwnd) -> i32;
+    fn GetClientRect(hwnd: Hwnd, rect: *mut Rect) -> i32;
+    fn ClientToScreen(hwnd: Hwnd, point: *mut Point) -> i32;
+}
+
+struct FindWindow {
+    pid: u32,
+    found: Hwnd,
+}
+
+unsafe extern "system" fn enum_cb(hwnd: Hwnd, lparam: isize) -> i32 {
+    unsafe {
+        let ctx = &mut *(lparam as *mut FindWindow);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == ctx.pid && IsWindowVisible(hwnd) != 0 {
+            ctx.found = hwnd;
+            return 0; // parar
+        }
+        1
+    }
+}
+
+/// Área de la ventana visible del proceso (x, y, ancho, alto) en pantalla.
+fn window_rect(pid: u32) -> Option<(i32, i32, u32, u32)> {
+    unsafe {
+        let mut ctx = FindWindow { pid, found: std::ptr::null_mut() };
+        EnumWindows(enum_cb, &mut ctx as *mut FindWindow as isize);
+        let hwnd = ctx.found;
+        if hwnd.is_null() || IsIconic(hwnd) != 0 {
+            return None; // minimizada: que scrcpy decida
+        }
+        let mut r = Rect::default();
+        if GetClientRect(hwnd, &mut r) == 0 {
+            return None;
+        }
+        let mut p = Point::default();
+        if ClientToScreen(hwnd, &mut p) == 0 {
+            return None;
+        }
+        let (w, h) = (r.right - r.left, r.bottom - r.top);
+        if w < 100 || h < 100 {
+            return None;
+        }
+        Some((p.x, p.y, w as u32, h as u32))
+    }
 }

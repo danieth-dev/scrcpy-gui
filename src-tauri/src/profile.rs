@@ -135,6 +135,48 @@ pub struct EncoderInfo {
 pub struct DeviceCaps {
     pub cameras: Vec<CameraInfo>,
     pub encoders: Vec<EncoderInfo>,
+    pub display: Option<DisplayInfo>,
+}
+
+/// Pantalla del teléfono (tamaño en uso y frecuencias de refresco).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DisplayInfo {
+    pub width: u32,
+    pub height: u32,
+    pub refresh: Vec<u32>,
+}
+
+/// Interpreta `wm size` + la línea `supportedRefreshRates [...]` de
+/// `dumpsys display`. Si hay "Override size" (resolución reducida en los
+/// ajustes del teléfono), manda ese: es lo que se captura.
+pub fn parse_display(out: &str) -> Option<DisplayInfo> {
+    let mut physical = None;
+    let mut over = None;
+    let mut refresh: Vec<u32> = Vec::new();
+    for line in out.lines() {
+        let l = line.trim();
+        if let Some(v) = l.strip_prefix("Physical size:") {
+            physical = parse_size(v);
+        } else if let Some(v) = l.strip_prefix("Override size:") {
+            over = parse_size(v);
+        } else if let Some(rest) = l.split("supportedRefreshRates [").nth(1) {
+            let list = rest.split(']').next().unwrap_or("");
+            for x in list.split(',') {
+                if let Ok(f) = x.trim().parse::<f32>() {
+                    let f = f.round() as u32;
+                    if f > 0 && !refresh.contains(&f) {
+                        refresh.push(f);
+                    }
+                }
+            }
+        }
+    }
+    let (w, h) = over.or(physical)?;
+    refresh.sort_unstable_by(|a, b| b.cmp(a));
+    if refresh.is_empty() {
+        refresh.push(60);
+    }
+    Some(DisplayInfo { width: w, height: h, refresh })
 }
 
 impl DeviceCaps {
@@ -235,7 +277,7 @@ pub fn parse_caps(out: &str) -> DeviceCaps {
         }
     }
 
-    DeviceCaps { cameras, encoders }
+    DeviceCaps { cameras, encoders, display: None }
 }
 
 /// Consulta (y cachea) las capacidades del dispositivo. ~1-2 s la primera vez.
@@ -264,7 +306,17 @@ pub async fn device_caps(serial: &str) -> Result<DeviceCaps, String> {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let caps = parse_caps(&text);
+    let mut caps = parse_caps(&text);
+    // Pantalla: tamaño en uso y refresco (barato, sin el servidor).
+    let disp_cmd = "wm size; dumpsys display 2>/dev/null | grep -m1 -o 'supportedRefreshRates \\[[^]]*\\]'";
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        Duration::from_secs(5),
+        run_adb(&t.adb, &["-s", serial, "shell", disp_cmd]),
+    )
+    .await
+    {
+        caps.display = parse_display(&out);
+    }
     if caps.cameras.is_empty() && caps.encoders.is_empty() {
         return Err("El dispositivo no informó cámaras ni codificadores".into());
     }
@@ -300,6 +352,36 @@ pub struct ProfileRequest {
     /// no lo envía.
     #[serde(default, skip_deserializing)]
     pub throttle: Option<u8>,
+    /// "max" = lo mejor que dé este teléfono (ignora resolución, fps, códec
+    /// y bitrate); "custom" o vacío = lo que pida el usuario.
+    #[serde(default)]
+    pub quality: Option<String>,
+    /// Conexión por Wi-Fi (la fija el backend según el serial).
+    #[serde(default, skip_deserializing)]
+    pub wifi: bool,
+}
+
+/// ¿Serial de una conexión inalámbrica? (IP:puerto o adb-tls por mDNS)
+pub fn is_wifi_serial(serial: &str) -> bool {
+    serial.contains(':') || serial.contains("_adb-tls-connect")
+}
+
+/// Bitrate automático de "Máxima calidad": el recomendado para esa imagen,
+/// sin pasarse en Wi-Fi (que no suele sostener más de ~16 Mbps estables).
+fn auto_bitrate(w: u32, h: u32, fps: u32, codec: &str, wifi: bool) -> u32 {
+    let b = recommended_mbps(w, h, fps, codec).clamp(8, 40);
+    if wifi { b.min(16) } else { b }
+}
+
+/// Mejor códec por hardware disponible para el destino.
+fn best_hw_codec(caps: &DeviceCaps, target: Target) -> &'static str {
+    if caps.hw_encoder("h265").is_some() {
+        "h265"
+    } else if target == Target::Window && caps.hw_encoder("av1").is_some() {
+        "av1"
+    } else {
+        "h264"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +420,22 @@ pub struct ResolvedProfile {
 }
 
 impl ResolvedProfile {
+    /// ¿Cambia algo que obligue a relanzar la sesión? (las notas no cuentan)
+    pub fn differs(&self, other: &ResolvedProfile) -> bool {
+        self.camera_id != other.camera_id
+            || self.facing != other.facing
+            || self.width != other.width
+            || self.height != other.height
+            || self.fps != other.fps
+            || self.high_speed != other.high_speed
+            || self.codec != other.codec
+            || self.encoder != other.encoder
+            || self.bitrate_mbps != other.bitrate_mbps
+            || (self.zoom - other.zoom).abs() > 0.01
+            || self.torch != other.torch
+            || self.orientation != other.orientation
+    }
+
     /// Dimensiones del vídeo que sale del teléfono (tras rotar).
     pub fn output_size(&self) -> (u32, u32) {
         if self.orientation == 90 || self.orientation == 270 {
@@ -387,7 +485,9 @@ pub fn resolve(caps: Option<&DeviceCaps>, req: &ProfileRequest, target: Target) 
         Some("external") => "external",
         _ => "front",
     };
+    let is_max = req.quality.as_deref() == Some("max");
     let mut want_h = match req.max_size.unwrap_or(1080) {
+        _ if is_max => u32::MAX,
         0 => u32::MAX,
         h => h,
     };
@@ -473,6 +573,10 @@ pub fn resolve(caps: Option<&DeviceCaps>, req: &ProfileRequest, target: Target) 
     let size: Option<(u32, u32)> = None;
     let mut fps = 0u32;
     let normal_max = cam.fps.iter().copied().max().unwrap_or(30);
+    if is_max {
+        // Lo máximo fiable de esta cámara (con protección nivel 2, ≤24).
+        want_fps = if throttle >= 2 { normal_max.min(24) } else { normal_max };
+    }
     if want_fps > normal_max && !cam.high_speed.is_empty() {
         notes.push(format!(
             "La cámara anuncia más de {normal_max} fps sólo en modo alta velocidad, que no es fiable fuera de la app del fabricante"
@@ -516,12 +620,13 @@ pub fn resolve(caps: Option<&DeviceCaps>, req: &ProfileRequest, target: Target) 
         if list.is_empty() {
             fps = want_fps.min(30);
         }
-        if fps != want_fps && fps < want_fps && throttle == 0 {
+        if fps != want_fps && fps < want_fps && throttle == 0 && !is_max {
             notes.push(format!("La cámara admite como máximo {fps} fps a esta resolución"));
         }
     }
 
     // 5. Codec: sólo codificadores hardware (los de software calientan y van lentos)
+    let want_codec = if is_max { best_hw_codec(caps, target) } else { want_codec };
     let mut codec = want_codec;
     if !codec_ok_for_target(codec) {
         notes.push(format!("{} no es compatible con la cámara virtual", codec_label(codec)));
@@ -561,9 +666,15 @@ pub fn resolve(caps: Option<&DeviceCaps>, req: &ProfileRequest, target: Target) 
         torch = false;
     }
 
-    // 7. Bitrate: se respeta, pero se avisa si limita la calidad
+    // 7. Bitrate: automático en "max"; si no, se respeta y se avisa si limita
+    if is_max {
+        bitrate_mbps = auto_bitrate(size.0, size.1, fps, codec, req.wifi);
+        if throttle >= 2 {
+            bitrate_mbps = bitrate_mbps.min(6);
+        }
+    }
     let rec = recommended_mbps(size.0, size.1, fps, codec);
-    if throttle == 0 && bitrate_mbps * 10 < rec * 7 {
+    if throttle == 0 && !is_max && bitrate_mbps * 10 < rec * 7 {
         notes.push(format!(
             "{bitrate_mbps} Mbps puede verse comprimido a {}x{}@{fps}; recomendado ≈{rec} Mbps",
             size.0, size.1
@@ -593,7 +704,214 @@ pub fn resolve(caps: Option<&DeviceCaps>, req: &ProfileRequest, target: Target) 
 /// capacidades devuelve un perfil conservador.
 pub async fn resolve_for(serial: &str, req: &ProfileRequest, target: Target) -> ResolvedProfile {
     let caps = device_caps(serial).await.ok();
-    resolve(caps.as_ref(), req, target)
+    let mut req = req.clone();
+    req.wifi = is_wifi_serial(serial);
+    resolve(caps.as_ref(), &req, target)
+}
+
+// ── Opciones válidas para la UI ───────────────────────────────────────────
+
+/// Lo que puede elegir el usuario en una cámara de este teléfono.
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraOption {
+    pub id: String,
+    pub facing: String,
+    /// Tamaños 16:9 utilizables (≤ 4K), de mayor a menor, uno por altura.
+    pub sizes: Vec<(u32, u32)>,
+    pub fps: Vec<u32>,
+    #[serde(rename = "zoomMax")]
+    pub zoom_max: Option<f32>,
+    pub torch: bool,
+}
+
+/// Primera cámara de cada orientación (la principal), como usa `resolve`.
+pub fn camera_options(caps: &DeviceCaps) -> Vec<CameraOption> {
+    let mut out: Vec<CameraOption> = Vec::new();
+    for cam in &caps.cameras {
+        if out.iter().any(|o| o.facing == cam.facing) {
+            continue;
+        }
+        let mut sizes: Vec<(u32, u32)> = cam
+            .sizes
+            .iter()
+            .copied()
+            .filter(|&(w, h)| is_16_9(w, h) && w <= 3840 && h <= 2160 && h >= 360)
+            .collect();
+        sizes.sort_by_key(|&(w, h)| std::cmp::Reverse(w as u64 * h as u64));
+        sizes.dedup_by_key(|s| s.1);
+        let mut fps = cam.fps.clone();
+        fps.sort_unstable();
+        out.push(CameraOption {
+            id: cam.id.clone(),
+            facing: cam.facing.clone(),
+            sizes,
+            fps,
+            zoom_max: cam.zoom_max,
+            torch: cam.facing == "back",
+        });
+    }
+    out
+}
+
+/// Opciones de "Ver pantalla" de este teléfono.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScreenOptions {
+    /// (lado corto, ancho, alto); lado corto 0 = nativa.
+    pub sizes: Vec<(u32, u32, u32)>,
+    pub fps: Vec<u32>,
+}
+
+fn screen_size_for(d: &DisplayInfo, short: u32) -> (u32, u32) {
+    let (dw, dh) = (d.width, d.height);
+    let native_short = dw.min(dh);
+    if short == 0 || short >= native_short {
+        return (dw, dh);
+    }
+    let scale = short as f64 / native_short as f64;
+    let w = ((dw as f64 * scale).round() as u32) & !1;
+    let h = ((dh as f64 * scale).round() as u32) & !1;
+    (w, h)
+}
+
+pub fn screen_options(d: &DisplayInfo) -> ScreenOptions {
+    let native_short = d.width.min(d.height);
+    let mut sizes = vec![(0, d.width, d.height)];
+    for short in [1440u32, 1080, 720, 480] {
+        if short < native_short {
+            let (w, h) = screen_size_for(d, short);
+            sizes.push((short, w, h));
+        }
+    }
+    let max_refresh = d.refresh.first().copied().unwrap_or(60);
+    let mut fps: Vec<u32> = [30u32, 60, 90, 120, 144]
+        .into_iter()
+        .filter(|f| *f <= max_refresh && (*f <= 60 || d.refresh.contains(f)))
+        .collect();
+    if fps.is_empty() {
+        fps.push(max_refresh);
+    }
+    ScreenOptions { sizes, fps }
+}
+
+// ── "Ver pantalla" ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct ScreenRequest {
+    /// Lado corto deseado (720, 1080…); 0 = nativa.
+    pub res: Option<u32>,
+    pub fps: Option<u32>,
+    pub codec: Option<String>,
+    pub bitrate: Option<u32>,
+    pub quality: Option<String>,
+    pub wifi: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ScreenProfile {
+    /// Valor para `--max-size` (lado largo); 0 = sin límite (nativa).
+    #[serde(rename = "maxSize")]
+    pub max_size: u32,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub codec: String,
+    pub encoder: Option<String>,
+    #[serde(rename = "bitrateMbps")]
+    pub bitrate_mbps: u32,
+    pub notes: Vec<String>,
+}
+
+impl ScreenProfile {
+    pub fn differs(&self, o: &ScreenProfile) -> bool {
+        self.max_size != o.max_size
+            || self.fps != o.fps
+            || self.codec != o.codec
+            || self.encoder != o.encoder
+            || self.bitrate_mbps != o.bitrate_mbps
+    }
+}
+
+/// Traduce los ajustes de pantalla a lo que da este teléfono. "1080p" se
+/// interpreta por el lado CORTO (en un 1080×2340 es la nativa): `--max-size`
+/// de scrcpy limita el lado largo y, a pelo, reducía la imagen a ~498×1080.
+pub fn resolve_screen(caps: Option<&DeviceCaps>, req: &ScreenRequest) -> ScreenProfile {
+    let mut notes = Vec::new();
+    let is_max = req.quality.as_deref() == Some("max");
+    let display = caps.and_then(|c| c.display.clone());
+
+    let (max_size, width, height, max_refresh) = match &display {
+        Some(d) => {
+            let short = if is_max { 0 } else { req.res.unwrap_or(0) };
+            let (w, h) = screen_size_for(d, short);
+            let native = (w, h) == (d.width, d.height);
+            let max_size = if native { 0 } else { w.max(h) };
+            (max_size, w, h, d.refresh.first().copied().unwrap_or(60))
+        }
+        None => {
+            // Sin datos de pantalla: no limitar (scrcpy usa la nativa).
+            let short = if is_max { 0 } else { req.res.unwrap_or(0) };
+            let ms = if short == 0 { 0 } else { (short as f64 * 2.2) as u32 };
+            (ms, 0, 0, 60)
+        }
+    };
+
+    let want_fps = if is_max { max_refresh } else { req.fps.unwrap_or(60).clamp(1, 240) };
+    let fps = want_fps.min(max_refresh);
+    if fps < want_fps && display.is_some() {
+        notes.push(format!("La pantalla refresca como máximo a {max_refresh} Hz"));
+    }
+
+    let want_codec = match (is_max, caps) {
+        (true, Some(c)) => best_hw_codec(c, Target::Window),
+        _ => match req.codec.as_deref() {
+            Some("h265") | Some("hevc") => "h265",
+            Some("av1") => "av1",
+            _ => "h264",
+        },
+    };
+    let (codec, encoder) = match caps {
+        Some(c) => match c.hw_encoder(want_codec) {
+            Some(e) => (want_codec, Some(e.name.clone())),
+            None => {
+                let fb = if c.hw_encoder("h265").is_some() { "h265" } else { "h264" };
+                if fb != want_codec {
+                    notes.push(format!(
+                        "Sin codificador por hardware para {}; se usa {}",
+                        codec_label(want_codec),
+                        codec_label(fb)
+                    ));
+                }
+                (fb, c.hw_encoder(fb).map(|e| e.name.clone()))
+            }
+        },
+        None => (want_codec, None),
+    };
+
+    let bitrate_mbps = if is_max && width > 0 {
+        // La pantalla cambia menos que una cámara: con 60 fps de referencia
+        // sobra aunque refresque a 120.
+        auto_bitrate(width, height, fps.min(60), codec, req.wifi)
+    } else {
+        req.bitrate.unwrap_or(8).clamp(1, 100)
+    };
+
+    ScreenProfile {
+        max_size,
+        width,
+        height,
+        fps,
+        codec: codec.into(),
+        encoder,
+        bitrate_mbps,
+        notes,
+    }
+}
+
+pub async fn resolve_screen_for(serial: &str, req: &ScreenRequest) -> ScreenProfile {
+    let caps = device_caps(serial).await.ok();
+    let mut req = req.clone();
+    req.wifi = is_wifi_serial(serial);
+    resolve_screen(caps.as_ref(), &req)
 }
 
 #[cfg(test)]
@@ -713,6 +1031,85 @@ mod tests {
         let p = resolve(Some(&c), &r, Target::Vcam);
         assert_eq!((p.width, p.height, p.fps, p.bitrate_mbps), (1280, 720, 24, 6));
         assert_eq!(p.throttle, 2);
+    }
+
+    #[test]
+    fn differs_ignores_notes_and_unreachable_fps() {
+        let c = parse_caps(SAMPLE);
+        let a = resolve(Some(&c), &req("front", 1080, 30, "h264"), Target::Vcam);
+        // 60 fps no existe en esta cámara: el perfil resultante es el mismo
+        let b = resolve(Some(&c), &req("front", 1080, 60, "h264"), Target::Vcam);
+        assert!(!a.differs(&b));
+        assert_ne!(a.notes, b.notes);
+        let c720 = resolve(Some(&c), &req("front", 720, 30, "h264"), Target::Vcam);
+        assert!(a.differs(&c720));
+    }
+
+    const A55_DISPLAY: &str = "Physical size: 1080x2340
+supportedRefreshRates [120.00001, 60.0]
+";
+
+    fn a55() -> DeviceCaps {
+        let mut c = parse_caps(SAMPLE);
+        c.display = parse_display(A55_DISPLAY);
+        c
+    }
+
+    #[test]
+    fn parses_display() {
+        let d = parse_display(A55_DISPLAY).unwrap();
+        assert_eq!((d.width, d.height, d.refresh.clone()), (1080, 2340, vec![120, 60]));
+        let o = parse_display("Physical size: 1440x3120\nOverride size: 1080x2340\n").unwrap();
+        assert_eq!((o.width, o.height), (1080, 2340));
+    }
+
+    #[test]
+    fn max_quality_camera() {
+        let c = a55();
+        let mut r = req("back", 720, 15, "h264");
+        r.quality = Some("max".into());
+        let p = resolve(Some(&c), &r, Target::Vcam);
+        assert_eq!((p.width, p.height, p.fps, p.codec.as_str()), (3840, 2160, 30, "h265"));
+        assert_eq!(p.bitrate_mbps, 20);
+        assert!(p.notes.is_empty(), "{:?}", p.notes);
+        r.facing = Some("front".into());
+        let p = resolve(Some(&c), &r, Target::Vcam);
+        assert_eq!((p.width, p.height), (2560, 1440)); // mayor 16:9 de SAMPLE
+        r.wifi = true;
+        r.facing = Some("back".into());
+        assert!(resolve(Some(&c), &r, Target::Vcam).bitrate_mbps <= 16);
+        r.wifi = false;
+        r.throttle = Some(1);
+        let p = resolve(Some(&c), &r, Target::Vcam);
+        assert_eq!((p.width, p.height), (2560, 1440));
+    }
+
+    #[test]
+    fn camera_options_lists_real_choices() {
+        let o = camera_options(&a55());
+        let back = o.iter().find(|c| c.facing == "back").unwrap();
+        assert_eq!(back.sizes, vec![(3840, 2160), (2560, 1440), (1920, 1080), (1280, 720)]);
+        assert_eq!(back.fps, vec![15, 20, 24, 30]);
+        assert!(back.torch);
+        assert!(!o.iter().find(|c| c.facing == "front").unwrap().torch);
+    }
+
+    #[test]
+    fn screen_resolution_uses_short_side() {
+        let c = a55();
+        let base = ScreenRequest { res: Some(1080), fps: Some(60), codec: Some("h264".into()), bitrate: Some(8), ..Default::default() };
+        let p = resolve_screen(Some(&c), &base);
+        assert_eq!((p.max_size, p.width, p.height), (0, 1080, 2340)); // nativa
+        let p = resolve_screen(Some(&c), &ScreenRequest { res: Some(720), ..base.clone() });
+        assert_eq!((p.max_size, p.width, p.height), (1560, 720, 1560));
+        let p = resolve_screen(Some(&c), &ScreenRequest { fps: Some(144), ..base.clone() });
+        assert_eq!(p.fps, 120);
+        let p = resolve_screen(Some(&c), &ScreenRequest { quality: Some("max".into()), ..base.clone() });
+        assert_eq!((p.max_size, p.fps, p.codec.as_str()), (0, 120, "h265"));
+        let o = screen_options(c.display.as_ref().unwrap());
+        assert_eq!(o.fps, vec![30, 60, 120]);
+        assert_eq!(o.sizes[0], (0, 1080, 2340));
+        assert_eq!(o.sizes[1], (720, 720, 1560));
     }
 
     #[test]

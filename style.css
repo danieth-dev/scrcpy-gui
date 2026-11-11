@@ -665,7 +665,7 @@ h1 {
 /* ===== 6. PRESETS Y AJUSTES EN VIVO ===== */
 .presets {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--s3);
   border: 0;
   padding: 0;
@@ -1416,3 +1416,46 @@ input.field.mono {
 .chip.temp { font-variant-numeric: tabular-nums; }
 .chip.temp.warm { color: var(--warn); border-color: var(--warn); }
 .chip.temp.hot { color: var(--danger); border-color: var(--danger); }
+
+/* Nota bajo la etiqueta de un ajuste */
+.lbl .row-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--text-3);
+  max-width: 34ch;
+}
+
+/* ── Ajustes adaptados al teléfono ── */
+.panel .subhead {
+  margin: var(--s2) 0 calc(var(--s2) * -1);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.panel .subhead .hint { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-3); }
+.panel h3 .auto-badge {
+  margin-left: var(--s2);
+  font-size: 11px;
+  vertical-align: middle;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.caps-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+/* En "Máxima calidad" los controles de calidad muestran lo automático. */
+.panel.auto .quality-ctl { opacity: .72; }
+.panel.auto .quality-ctl:hover,
+.panel.auto .quality-ctl:focus-within { opacity: 1; }
+.row.is-disabled { opacity: .45; }
+.seg input:disabled + span { cursor: not-allowed; }
+#ppSummary { white-space: pre-line; }
+
+.chip[hidden] { display: none; }

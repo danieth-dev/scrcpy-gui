@@ -104,6 +104,7 @@
     vcamStop:          ()                => invoke('vcam_stop'),
     vcamInstallDriver: ()                => invoke('vcam_install_driver'),
     deviceProfile:     (serial, options, target) => invoke('device_profile', { serial, options, target }),
+    applySettings:     (settings)        => invoke('apply_settings', { settings }),
     onVcamStats:       (cb)              => listenEvent('vcam:stats', cb),
     onVcamStopped:     (cb)              => listenEvent('vcam:stopped', cb),
     onDeviceHealth:    (cb)              => listenEvent('device:health', cb),

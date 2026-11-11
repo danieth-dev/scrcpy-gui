@@ -789,6 +789,38 @@ impl VcamManager {
     /// Relanza la sesión de ese teléfono con otro nivel de protección, sin que
     /// la UI vea una parada. Espera a que la anterior libere la cámara.
     pub async fn restart(&self, serial: &str, throttle: u8, app: AppHandle) -> Result<ResolvedProfile, String> {
+        self.restart_inner(serial, None, throttle, app).await
+    }
+
+    /// Relanza con ajustes nuevos (aplicación en vivo desde la pestaña Ajustes).
+    pub async fn restart_with(
+        &self,
+        serial: &str,
+        request: ProfileRequest,
+        throttle: u8,
+        app: AppHandle,
+    ) -> Result<ResolvedProfile, String> {
+        self.restart_inner(serial, Some(request), throttle, app).await
+    }
+
+    /// Perfil aplicado ahora mismo en ese teléfono, si hay sesión.
+    pub async fn session_profile(&self, serial: &str) -> Option<ResolvedProfile> {
+        let st = self.state.lock().await;
+        st.session.as_ref().filter(|s| s.serial == serial).map(|s| s.profile.clone())
+    }
+
+    /// Teléfono con la cámara virtual activa, si la hay.
+    pub async fn active_serial(&self) -> Option<String> {
+        self.state.lock().await.session.as_ref().map(|s| s.serial.clone())
+    }
+
+    async fn restart_inner(
+        &self,
+        serial: &str,
+        new_request: Option<ProfileRequest>,
+        throttle: u8,
+        app: AppHandle,
+    ) -> Result<ResolvedProfile, String> {
         let (mut request, mut done) = {
             let mut st = self.state.lock().await;
             let Some(sess) = st.session.take_if(|s| s.serial == serial) else {
@@ -796,7 +828,7 @@ impl VcamManager {
             };
             sess.quiet.store(true, Ordering::SeqCst);
             sess.stop.notify_one();
-            (sess.request, sess.done)
+            (new_request.unwrap_or(sess.request), sess.done)
         };
         let _ = tokio::time::timeout(Duration::from_secs(6), done.wait_for(|d| *d)).await;
         request.throttle = Some(throttle);
