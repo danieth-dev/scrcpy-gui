@@ -1,1563 +1,1344 @@
-/* ── renderer.js — scrcpy GUI logic ─────────────────────────── */
+/**
+ * renderer.js — scrcpy GUI
+ * Lógica de frontend para el nuevo diseño (Tauri v2 + Rust)
+ */
 
-// ── State ──────────────────────────────────────────────────────
-const state = {
-  devices: [],
-  sessions: {},         // serial → { model, brand, mode: 'mirror'|'camera'|'record' }
-  selectedDevice: null, // device object for modal
-  settings: loadSettings(),
-  restartingSerials: new Set(), // serials being restarted by preset apply
-};
+(function () {
+  'use strict';
 
-// ── DOM refs ───────────────────────────────────────────────────
-const $ = id => document.getElementById(id);
-const $$ = sel => document.querySelectorAll(sel);
-
-// Nav
-const navItems   = $$('.nav-item');
-const sections   = $$('.section');
-const sessionBadge = $('sessionsBadge');
-
-// Devices
-const devicesLoading = $('devicesLoading');
-const devicesEmpty   = $('devicesEmpty');
-const devicesList    = $('devicesList');
-
-// WiFi
-const usbDeviceSelect     = $('usbDeviceSelect');
-const btnEnableTcpip      = $('btnEnableTcpip');
-const tcpipResult         = $('tcpipResult');
-const wifiIp              = $('wifiIp');
-const wifiPort            = $('wifiPort');
-const wifiEndpoint        = $('wifiEndpoint');
-const btnConnectWifi      = $('btnConnectWifi');
-const wifiConnectResult   = $('wifiConnectResult');
-const pairEndpoint        = $('pairEndpoint');
-const pairCode            = $('pairCode');
-const btnPairWifi         = $('btnPairWifi');
-const pairResult          = $('pairResult');
-const recentsBlock        = $('recentsBlock');
-const recentsList         = $('recentsList');
-const btnClearRecents     = $('btnClearRecents');
-
-// Sessions
-const sessionsList = $('sessionsList');
-
-// Settings
-const maxSizeSlider  = $('maxSize');
-const maxSizeVal     = $('maxSizeVal');
-const maxFpsSlider   = $('maxFps');
-const maxFpsVal      = $('maxFpsVal');
-const bitrateSlider  = $('bitrate');
-const bitrateVal     = $('bitrateVal');
-const codecSelect    = $('codec');
-const noAudioCb      = $('noAudio');
-const stayAwakeCb    = $('stayAwake');
-const screenOffCb    = $('screenOff');
-
-// Modal
-const deviceModal       = $('deviceModal');
-const modalClose        = $('modalClose');
-const modalDeviceInfo   = $('modalDeviceInfo');
-const modalLaunch       = $('modalLaunch');
-const modalScreenshot   = $('modalScreenshot');
-const modalCamera       = $('modalCamera');
-const modalRecord       = $('modalRecord');
-const modalDisconnect   = $('modalDisconnect');
-
-// Status
-const toolStatusPill = $('toolStatusPill');
-const toolStatusText = $('toolStatusText');
-
-// Titlebar
-$('btnMin').addEventListener('click',   () => window.api.minimize());
-$('btnMax').addEventListener('click',   () => window.api.maximize());
-$('btnClose').addEventListener('click', () => window.api.close());
-
-// ── Navigation ─────────────────────────────────────────────────
-navItems.forEach(item => {
-  item.addEventListener('click', () => {
-    const target = item.dataset.section;
-    navItems.forEach(n => n.classList.remove('active'));
-    item.classList.add('active');
-    sections.forEach(s => s.classList.remove('active'));
-    const sectionEl = document.getElementById(`section-${target}`);
-    if (sectionEl) {
-      sectionEl.classList.add('active');
-    } else {
-      console.error(`[nav] Sección no encontrada: section-${target}`);
-    }
-  });
-});
-
-// ── Settings helpers ───────────────────────────────────────────
-function loadSettings() {
-  try {
-    const raw = localStorage.getItem('scrcpy-settings');
-    const parsed = raw ? JSON.parse(raw) : {};
-    return { ...defaultSettings(), ...parsed };
-  } catch (_) { return defaultSettings(); }
-}
-function defaultSettings() {
-  return {
-    maxSize: 1080,
-    maxFps: 30,
-    bitrate: 8,
-    codec: 'h264',
-    noAudio: true,
-    stayAwake: true,
-    screenOff: true,
-    cameraFacing: 'front',
-    orientation: '0',
-    cameraZoom: 1,
-    cameraTorch: false,
+  // ── 1. Estado de la Aplicación ─────────────────────────────────────
+  const state = {
+    devices: [],
+    sessions: {},         // serial -> { serial, mode, startedAt, resolution, fps, pid }
+    vcam: { running: false, serial: null, isDriverInstalled: false, fps: 0 },
+    selectedDevice: null,
+    settings: loadSettings(),
+    recents: loadRecents(),
+    iphoneMode: 'usb',    // 'usb' | 'air'
+    iphoneRunning: false,
+    pollTimer: null,
+    clockTimer: null,
   };
-}
-// ======== Settings Management ========
-const inputMaxSize = $('maxSize');
-const valMaxSize = $('maxSizeVal');
-const inputMaxFps = $('maxFps');
-const valMaxFps = $('maxFpsVal');
-const inputBitrate = $('bitrate');
-const valBitrate = $('bitrateVal');
-const inputCodec = $('codec');
-const inputCameraFacing = $('cameraFacing');
-const inputOrientation = $('orientation');
-const inputCameraZoom = $('cameraZoom');
-const valCameraZoom = $('cameraZoomVal');
-const toggleCameraTorch = $('cameraTorch');
-const toggleNoAudio = $('noAudio');
-const toggleStayAwake = $('stayAwake');
-const toggleScreenOff = $('screenOff');
-const dupConnectionWarn = $('dupConnectionWarn');
-const btnSaveSettings = $('btnSaveSettings');
-const btnResetSettings = $('btnResetSettings');
 
-// Preset buttons
-const presetDefault = $('presetDefault');
-const presetWebcam = $('presetWebcam');
-const presetStream = $('presetStream');
-const presetGaming = $('presetGaming');
 
-function updateSettingsUI() {
-  const s = state.settings;
-  inputMaxSize.value = s.maxSize;
-  valMaxSize.textContent = s.maxSize + 'p';
-  inputMaxFps.value = s.maxFps;
-  valMaxFps.textContent = s.maxFps + ' fps';
-  inputBitrate.value = s.bitrate;
-  valBitrate.textContent = s.bitrate + ' Mbps';
-  inputCodec.value = s.codec;
-  if (inputCameraFacing) inputCameraFacing.value = s.cameraFacing || 'front';
-  if (inputOrientation) inputOrientation.value = String(s.orientation ?? '0');
-  if (inputCameraZoom) {
-    inputCameraZoom.value = s.cameraZoom ?? 1;
-    if (valCameraZoom) valCameraZoom.textContent = `${Number(s.cameraZoom ?? 1).toFixed(1)}×`;
-  }
-  if (toggleCameraTorch) toggleCameraTorch.checked = !!s.cameraTorch;
-  toggleNoAudio.checked = s.noAudio;
-  toggleStayAwake.checked = s.stayAwake;
-  toggleScreenOff.checked = s.screenOff;
-}
-
-function applySettingsToUI() {
-  updateSettingsUI();
-  restoreActivePreset();
-}
-
-// ── Preset names map ───────────────────────────────────────────
-const PRESET_NAMES = {
-  default: 'Normal',
-  webcam:  'Webcam Reuniones',
-  stream:  'Webcam Streams',
-  gaming:  'Gaming',
-};
-
-// ── Preset definitions (optimizados Samsung A55 · modo cámara/webcam) ──
-const PRESETS = {
-  // Uso general: 1080p30 estable, menos calor que 60 fps
-  default: { maxSize: 1080, maxFps: 30, bitrate: 8,  codec: 'h264', noAudio: true, stayAwake: true, screenOff: true },
-  // Zoom/Meet/Teams: 720p basta; H.264 compatible y ligero
-  webcam:  { maxSize: 720,  maxFps: 30, bitrate: 5,  codec: 'h264', noAudio: true, stayAwake: true, screenOff: true },
-  // OBS/Twitch/YouTube: 1080p60 con H.265 (~14 Mbps sostenible en A55)
-  stream:  { maxSize: 1080, maxFps: 60, bitrate: 14, codec: 'h265', noAudio: true, stayAwake: true, screenOff: true },
-  // Gaming overlay: prioridad latencia
-  gaming:  { maxSize: 720,  maxFps: 60, bitrate: 6,  codec: 'h264', noAudio: true, stayAwake: true, screenOff: true },
-};
-
-function setActivePresetUI(presetKey) {
-  // Remove active from all
-  document.querySelectorAll('.preset-card').forEach(card => {
-    card.classList.remove('active');
-    const check = card.querySelector('.preset-check');
-    if (check) check.classList.remove('visible');
-  });
-
-  if (!presetKey) {
-    $('activePresetBadge').style.display = 'none';
-    return;
-  }
-
-  // Activate the selected
-  const card = document.querySelector(`.preset-card[data-preset="${presetKey}"]`);
-  if (card) {
-    card.classList.add('active');
-    const check = card.querySelector('.preset-check');
-    if (check) check.classList.add('visible');
-  }
-
-  const badge = $('activePresetBadge');
-  const nameEl = $('activePresetName');
-  if (badge && nameEl) {
-    badge.style.display = 'flex';
-    nameEl.textContent = PRESET_NAMES[presetKey] || presetKey;
-  }
-}
-
-function restoreActivePreset() {
-  const savedPreset = localStorage.getItem('scrcpy-active-preset');
-  if (savedPreset && PRESETS[savedPreset]) {
-    setActivePresetUI(savedPreset);
-  }
-}
-
-function clearActivePreset() {
-  // Called when user manually tweaks sliders — removes preset highlight
-  document.querySelectorAll('.preset-card').forEach(card => {
-    card.classList.remove('active');
-    const check = card.querySelector('.preset-check');
-    if (check) check.classList.remove('visible');
-  });
-  $('activePresetBadge').style.display = 'none';
-  localStorage.removeItem('scrcpy-active-preset');
-}
-
-
-function readSettingsFromUI() {
-  return {
-    maxSize:      parseInt(inputMaxSize.value, 10),
-    maxFps:       parseInt(inputMaxFps.value, 10),
-    bitrate:      parseInt(inputBitrate.value, 10),
-    codec:        inputCodec.value,
-    noAudio:      toggleNoAudio.checked,
-    stayAwake:    toggleStayAwake.checked,
-    screenOff:    toggleScreenOff.checked,
-    cameraFacing: inputCameraFacing ? inputCameraFacing.value : 'front',
-    orientation:  inputOrientation ? String(inputOrientation.value) : '0',
-    cameraZoom:   inputCameraZoom ? parseFloat(inputCameraZoom.value) : 1,
-    cameraTorch:  toggleCameraTorch ? toggleCameraTorch.checked : false,
-  };
-}
-
-function getCameraLaunchOptions(settings = state.settings) {
-  const s = settings;
-  return {
-    maxSize:      s.maxSize,
-    maxFps:       s.maxFps,
-    bitrate:      s.bitrate,
-    codec:        s.codec,
-    noAudio:      s.noAudio,
-    stayAwake:    s.stayAwake,
-    screenOff:    s.screenOff,
-    cameraFacing: s.cameraFacing || 'front',
-    orientation:  s.orientation ?? '0',
-    cameraZoom:   s.cameraZoom ?? 1,
-    cameraTorch:  !!s.cameraTorch,
-    cameraOnly:   true,
-  };
-}
-
-function getCameraSerials() {
-  return Object.keys(state.sessions).filter(
-    serial => state.sessions[serial]?.mode === 'camera'
-  );
-}
-
-async function restartCameraSessions(label = 'ajustes') {
-  const cameraSerials = getCameraSerials();
-  if (cameraSerials.length === 0) return 0;
-
-  showToast(`Aplicando ${label} a la cámara…`, 'info');
-  const options = getCameraLaunchOptions();
-  let okCount = 0;
-
-  for (const serial of cameraSerials) {
-    const meta = { ...state.sessions[serial], mode: 'camera' };
-    state.restartingSerials.add(serial);
-    try {
-      await window.api.stopScrcpy(serial);
-      await new Promise(r => setTimeout(r, 400));
-      const result = await window.api.launchScrcpy(serial, options);
-      if (result.ok) {
-        state.sessions[serial] = meta;
-        okCount++;
-      } else {
-        delete state.sessions[serial];
-        showToast(`Error al reiniciar cámara ${meta?.model || serial}`, 'error');
-      }
-    } finally {
-      state.restartingSerials.delete(serial);
-    }
-  }
-
-  updateSessionsUI();
-  renderDeviceCards(state.devices);
-  renderRecents();
-  return okCount;
-}
-
-async function applyPreset(presetKey) {
-  const preset = PRESETS[presetKey];
-  if (!preset) return;
-
-  state.settings = { ...state.settings, ...preset };
-  updateSettingsUI();
-  localStorage.setItem('scrcpy-settings', JSON.stringify(state.settings));
-  localStorage.setItem('scrcpy-active-preset', presetKey);
-  setActivePresetUI(presetKey);
-
-  const name = PRESET_NAMES[presetKey] || presetKey;
-  const hadCamera = getCameraSerials().length > 0;
-  const okCount = await restartCameraSessions(`"${name}"`);
-
-  if (okCount > 0) {
-    showToast(`✓ Preset "${name}" aplicado a la cámara`, 'success');
-  } else if (!hadCamera) {
-    showToast(`✓ Preset "${name}" guardado (para cámara)`, 'success');
-  }
-}
-
-presetDefault.addEventListener('click', () => applyPreset('default'));
-presetWebcam.addEventListener('click',  () => applyPreset('webcam'));
-presetStream.addEventListener('click',  () => applyPreset('stream'));
-presetGaming.addEventListener('click',  () => applyPreset('gaming'));
-
-
-inputMaxSize.addEventListener('input',  () => { valMaxSize.textContent  = `${inputMaxSize.value}p`; clearActivePreset(); });
-inputMaxFps.addEventListener('input',   () => { valMaxFps.textContent   = `${inputMaxFps.value} fps`; clearActivePreset(); });
-inputBitrate.addEventListener('input',  () => { valBitrate.textContent  = `${inputBitrate.value} Mbps`; clearActivePreset(); });
-if (inputCameraZoom) {
-  inputCameraZoom.addEventListener('input', () => {
-    if (valCameraZoom) valCameraZoom.textContent = `${Number(inputCameraZoom.value).toFixed(1)}×`;
-    clearActivePreset();
-  });
-}
-let settingsApplyLock = false;
-
-async function commitSettings({ clearPreset = true, toastSaved = true } = {}) {
-  if (settingsApplyLock) return;
-  settingsApplyLock = true;
-  try {
-    const s = readSettingsFromUI();
-    localStorage.setItem('scrcpy-settings', JSON.stringify(s));
-    state.settings = s;
-    if (clearPreset) clearActivePreset();
-
-    const okCount = await restartCameraSessions('ajustes');
-    if (okCount > 0) {
-      showToast('✓ Ajustes aplicados a la cámara', 'success');
-    } else if (toastSaved) {
-      showToast('Ajustes guardados', 'success');
-    }
-  } finally {
-    settingsApplyLock = false;
-  }
-}
-
-$('btnSaveSettings').addEventListener('click', () => commitSettings({ clearPreset: true }));
-$('btnResetSettings').addEventListener('click', async () => {
-  state.settings = defaultSettings();
-  applySettingsToUI();
-  localStorage.setItem('scrcpy-settings', JSON.stringify(state.settings));
-  localStorage.removeItem('scrcpy-active-preset');
-  const okCount = await restartCameraSessions('defaults');
-  if (okCount > 0) showToast('✓ Defaults aplicados a la cámara', 'success');
-  else showToast('Ajustes restablecidos', 'info');
-});
-
-// Live-apply when controls settle (change = after slider release / select / toggle)
-[inputMaxSize, inputMaxFps, inputBitrate, inputCameraZoom].filter(Boolean).forEach(el => {
-  el.addEventListener('change', () => commitSettings({ clearPreset: true }));
-});
-[inputCodec, inputCameraFacing, inputOrientation, toggleCameraTorch, toggleNoAudio, toggleStayAwake, toggleScreenOff]
-  .filter(Boolean)
-  .forEach(el => {
-    el.addEventListener('change', () => commitSettings({ clearPreset: true }));
-  });
-
-// ── Tool status check ──────────────────────────────────────────
-async function checkTools() {
-  const { scrcpy, adb } = await window.api.getToolsStatus();
-  if (scrcpy && adb) {
-    toolStatusPill.className = 'status-pill ok';
-    toolStatusText.textContent = 'scrcpy + ADB listos';
-  } else if (adb && !scrcpy) {
-    toolStatusPill.className = 'status-pill warn';
-    toolStatusText.textContent = 'scrcpy.exe no encontrado';
-  } else {
-    toolStatusPill.className = 'status-pill err';
-    toolStatusText.textContent = 'ADB no encontrado';
-  }
-}
-
-// ── Devices ────────────────────────────────────────────────────
-async function refreshDevices() {
-  // Show loading
-  devicesLoading.style.display = 'flex';
-  devicesEmpty.style.display   = 'none';
-  devicesList.style.display    = 'none';
-
-  const btnR = $('btnRefresh');
-  btnR.classList.add('spinning');
-
-  const result = await window.api.getDevices();
-
-  btnR.classList.remove('spinning');
-
-  if (!result.ok) {
-    showToast('Error al obtener dispositivos: ' + result.error, 'error');
-    devicesLoading.style.display = 'none';
-    devicesEmpty.style.display   = 'flex';
-    return;
-  }
-
-  state.devices = result.devices;
-  updateDupConnectionWarn(result.devices);
-  devicesLoading.style.display = 'none';
-  populateUsbSelect(result.devices);
-  renderRecents();
-
-  if (result.devices.length === 0) {
-    devicesEmpty.style.display = 'flex';
-    devicesList.style.display  = 'none';
-    return;
-  }
-
-  devicesEmpty.style.display = 'none';
-  devicesList.style.display  = 'grid';
-  renderDeviceCards(result.devices);
-}
-
-function updateDupConnectionWarn(devices) {
-  if (!dupConnectionWarn) return;
-  const groups = new Map();
-  for (const d of devices) {
-    const key = d.hardwareSerial || `${(d.brand || '').toLowerCase()}|${(d.model || '').toLowerCase()}`;
-    if (!key || key === '|') continue;
-    if (!groups.has(key)) groups.set(key, { usb: false, wifi: false });
-    const g = groups.get(key);
-    if (d.isWifi) g.wifi = true;
-    else g.usb = true;
-  }
-  const hasDup = [...groups.values()].some(g => g.usb && g.wifi);
-  dupConnectionWarn.style.display = hasDup ? 'block' : 'none';
-}
-
-function preferDeviceForCamera(dev) {
-  if (!dev) return dev;
-  // Prefer WiFi twin of the same phone when both are online
-  const key = dev.hardwareSerial || `${(dev.brand || '').toLowerCase()}|${(dev.model || '').toLowerCase()}`;
-  const wifiTwin = state.devices.find(d => {
-    if (!d.isWifi || d.serial === dev.serial) return false;
-    if (dev.hardwareSerial && d.hardwareSerial && d.hardwareSerial === dev.hardwareSerial) return true;
-    const dKey = `${(d.brand || '').toLowerCase()}|${(d.model || '').toLowerCase()}`;
-    return dKey === key && key !== '|';
-  });
-  if (!dev.isWifi && wifiTwin) {
-    showToast('Usando WiFi (evita conflicto USB+WiFi)', 'info');
-    return wifiTwin;
-  }
-  return dev;
-}
-
-function renderDeviceCards(devices) {
-  updateDupConnectionWarn(devices);
-  devicesList.innerHTML = '';
-  for (const dev of devices) {
-    const isRunning = !!state.sessions[dev.serial];
-    const card = document.createElement('div');
-    card.className = `device-card${isRunning ? ' running' : ''}`;
-    card.innerHTML = `
-      <div class="device-card-header">
-        <div class="device-avatar">${dev.isWifi ? 'W' : 'U'}</div>
-        <div class="device-info">
-          <div class="device-brand">${escHtml(dev.brand || 'Android')}</div>
-          <div class="device-model">${escHtml(dev.model || 'Dispositivo')}</div>
-          <div class="device-serial">${escHtml(dev.serial)}</div>
-        </div>
-      </div>
-      <div class="device-meta">
-        ${dev.androidVersion ? `<span class="meta-chip cyan">Android ${escHtml(dev.androidVersion)}</span>` : ''}
-        ${dev.batteryLevel   ? `<span class="meta-chip green">${escHtml(dev.batteryLevel)}%</span>` : ''}
-        ${dev.isWifi         ? `<span class="meta-chip">WiFi</span>` : `<span class="meta-chip">USB</span>`}
-        ${isRunning          ? `<span class="meta-chip green">Activo</span>` : ''}
-      </div>
-      <div class="device-launch-hint">${isRunning ? '✓ Activo' : 'Abrir →'}</div>
-    `;
-    card.addEventListener('click', () => openDeviceModal(dev));
-    devicesList.appendChild(card);
-  }
-}
-
-function populateUsbSelect(devices) {
-  if (usbDeviceSelect) {
-    usbDeviceSelect.innerHTML = '<option value="">— Selecciona un dispositivo USB —</option>';
-  }
-  const step2UsbSelect = $('step2UsbSelect');
-  if (step2UsbSelect) {
-    step2UsbSelect.innerHTML = '<option value="">— Seleccionar dispositivo USB (auto-completar IP:5555) —</option>';
-  }
-
-  const usbDevs = devices.filter(d => !d.isWifi);
-
-  for (const d of usbDevs) {
-    if (usbDeviceSelect) {
-      const opt = document.createElement('option');
-      opt.value = d.serial;
-      opt.textContent = `${d.brand || ''} ${d.model || 'Dispositivo'} (${d.serial})`.trim();
-      usbDeviceSelect.appendChild(opt);
-    }
-
-    if (step2UsbSelect) {
-      const opt = document.createElement('option');
-      const ip5555 = d.ip ? `${d.ip}:5555` : '';
-      opt.value = ip5555;
-      opt.textContent = d.ip
-        ? `${d.brand || ''} ${d.model || 'Dispositivo'} (${d.ip}:5555)`
-        : `${d.brand || ''} ${d.model || 'Dispositivo'} (${d.serial})`;
-      step2UsbSelect.appendChild(opt);
-    }
-  }
-
-  if (usbDevs.length > 0 && step2UsbSelect) {
-    const firstWithIp = usbDevs.find(d => d.ip);
-    if (firstWithIp) {
-      step2UsbSelect.value = `${firstWithIp.ip}:5555`;
-      if (wifiEndpoint && (!wifiEndpoint.value || wifiEndpoint.value.includes(':5555'))) {
-        setWifiEndpoint(firstWithIp.ip, '5555');
-      }
-    }
-    if (usbDeviceSelect) usbDeviceSelect.value = usbDevs[0].serial;
-  }
-}
-
-$('btnRefresh').addEventListener('click', refreshDevices);
-$('btnRefreshEmpty').addEventListener('click', refreshDevices);
-
-// ── Device Modal ───────────────────────────────────────────────
-function openDeviceModal(dev) {
-  state.selectedDevice = dev;
-  const isRunning = !!state.sessions[dev.serial];
-
-  modalDeviceInfo.innerHTML = `
-    <div class="device-avatar">${dev.isWifi ? 'W' : 'U'}</div>
-    <div class="device-brand">${escHtml(dev.brand || 'Android')}</div>
-    <div class="device-model">${escHtml(dev.model || 'Dispositivo')}</div>
-    <div class="meta-chips">
-      ${dev.androidVersion ? `<span class="meta-chip cyan">Android ${escHtml(dev.androidVersion)}</span>` : ''}
-      ${dev.batteryLevel   ? `<span class="meta-chip green">${escHtml(dev.batteryLevel)}%</span>` : ''}
-      ${dev.isWifi         ? `<span class="meta-chip">WiFi</span>` : `<span class="meta-chip">USB</span>`}
-    </div>
-  `;
-
-  modalLaunch.innerHTML = isRunning
-    ? `<span class="action-icon">■</span><span>Detener Mirror</span>`
-    : `<span class="action-icon">▶</span><span>Iniciar Mirror</span>`;
-
-  deviceModal.style.display = 'flex';
-}
-
-modalClose.addEventListener('click', () => { deviceModal.style.display = 'none'; });
-deviceModal.addEventListener('click', e => {
-  if (e.target === deviceModal) deviceModal.style.display = 'none';
-});
-
-modalLaunch.addEventListener('click', async () => {
-  const dev = state.selectedDevice;
-  if (!dev) return;
-
-  if (state.sessions[dev.serial]) {
-    await window.api.stopScrcpy(dev.serial);
-    delete state.sessions[dev.serial];
-    updateSessionsUI();
-    renderDeviceCards(state.devices);
-    deviceModal.style.display = 'none';
-    showToast(`Mirror de ${dev.model} detenido`, 'info');
-    return;
-  }
-
-  deviceModal.style.display = 'none';
-  await launchMirror(dev);
-});
-
-modalScreenshot.addEventListener('click', async () => {
-  const dev = state.selectedDevice;
-  if (!dev) return;
-  deviceModal.style.display = 'none';
-  showToast('Capturando pantalla…', 'info');
-  const res = await window.api.takeScreenshot(dev.serial);
-  if (res.ok) showToast('📷 Captura guardada', 'success');
-  else if (!res.cancelled) showToast('Error: ' + res.error, 'error');
-});
-
-modalCamera.addEventListener('click', async () => {
-  const dev = state.selectedDevice;
-  if (!dev) return;
-  deviceModal.style.display = 'none';
-  await launchCamera(dev);
-});
-
-modalRecord.addEventListener('click', async () => {
-  const dev = state.selectedDevice;
-  if (!dev) return;
-  deviceModal.style.display = 'none';
-  const s = state.settings;
-  const result = await window.api.launchScrcpy(dev.serial, {
-    ...s, record: true,
-  });
-  if (result.ok) {
-    state.sessions[dev.serial] = { model: dev.model, brand: dev.brand, mode: 'record' };
-    rememberDevice(dev);
-    updateSessionsUI();
-    renderDeviceCards(state.devices);
-    showToast('Grabación iniciada', 'success');
-  } else {
-    showToast('Error: ' + (result.error || 'desconocido'), 'error');
-  }
-});
-
-modalDisconnect.addEventListener('click', async () => {
-  const dev = state.selectedDevice;
-  if (!dev) return;
-  deviceModal.style.display = 'none';
-  const res = await window.api.disconnect(dev.serial);
-  if (res.ok) {
-    showToast(`Desconectado: ${dev.serial}`, 'info');
-    await refreshDevices();
-  } else {
-    showToast('Error al desconectar: ' + res.error, 'error');
-  }
-});
-
-// ── WiFi ───────────────────────────────────────────────────────
-function parseEndpoint(raw) {
-  const s = String(raw || '').trim()
-    .replace(/^adb\s+(connect|pair)\s+/i, '')
-    .replace(/\s+/g, '');
-  const m = s.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?$/);
-  if (!m) return null;
-  return { ip: m[1], port: m[2] || '5555', hasPort: !!m[2] };
-}
-
-function setWifiEndpoint(ip, port) {
-  const p = port || '5555';
-  wifiIp.value = ip || '';
-  wifiPort.value = p;
-  if (wifiEndpoint) wifiEndpoint.value = ip ? `${ip}:${p}` : '';
-}
-
-// ── Recents ────────────────────────────────────────────────────
-const RECENTS_KEY = 'scrcpy-recents';
-const RECENTS_MAX = 8;
-
-function loadRecents() {
-  try {
-    const raw = localStorage.getItem(RECENTS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-function saveRecents(list) {
-  localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, RECENTS_MAX)));
-}
-
-function rememberDevice(dev) {
-  if (!dev || !dev.serial) return;
-  const isWifi = !!dev.isWifi || /^\d+\.\d+\.\d+\.\d+(:\d+)?$/.test(dev.serial);
-  let host = null;
-  let port = null;
-  if (isWifi) {
-    const m = String(dev.serial).match(/^(\d+\.\d+\.\d+\.\d+)(?::(\d+))?$/);
-    if (m) {
-      host = m[1];
-      port = m[2] || '5555';
-    }
-  }
-  const entry = {
-    id: isWifi ? `${host}:${port}` : `usb:${dev.serial}`,
-    serial: isWifi ? `${host}:${port}` : dev.serial,
-    host,
-    port,
-    isWifi,
-    brand: dev.brand || '',
-    model: dev.model || 'Dispositivo',
-    lastUsed: Date.now(),
-  };
-  const list = loadRecents().filter(r => r.id !== entry.id);
-  list.unshift(entry);
-  saveRecents(list);
-  renderRecents();
-}
-
-function renderRecents() {
-  if (!recentsBlock || !recentsList) return;
-  const list = loadRecents();
-  if (list.length === 0) {
-    recentsBlock.style.display = 'none';
-    recentsList.innerHTML = '';
-    return;
-  }
-  recentsBlock.style.display = 'block';
-  recentsList.innerHTML = '';
-
-  for (const item of list) {
-    const online = state.devices.some(d => d.serial === item.serial);
-    const running = !!state.sessions[item.serial];
-    const card = document.createElement('div');
-    card.className = `recent-card${online ? ' online' : ''}${running ? ' running' : ''}`;
-    const label = `${item.brand || ''} ${item.model || ''}`.trim() || item.serial;
-    const meta = item.isWifi
-      ? `${item.host}:${item.port}`
-      : `USB · ${item.serial}`;
-    card.innerHTML = `
-      <div class="recent-info">
-        <div class="recent-name">${escHtml(label)}</div>
-        <div class="recent-meta">${escHtml(meta)}${online ? ' · en línea' : ''}</div>
-      </div>
-      <div class="recent-actions">
-        ${running
-          ? `<button type="button" class="btn-primary recent-action recent-stop">Detener</button>`
-          : `<button type="button" class="btn-primary recent-action recent-mirror">Mirror</button>
-             <button type="button" class="btn-camera-recent recent-action recent-camera">Cámara</button>`}
-        <button type="button" class="btn-text recent-remove" title="Quitar">✕</button>
-      </div>
-    `;
-    const stopBtn = card.querySelector('.recent-stop');
-    const mirrorBtn = card.querySelector('.recent-mirror');
-    const cameraBtn = card.querySelector('.recent-camera');
-    if (stopBtn) stopBtn.addEventListener('click', (e) => { e.stopPropagation(); useRecent(item, 'stop'); });
-    if (mirrorBtn) mirrorBtn.addEventListener('click', (e) => { e.stopPropagation(); useRecent(item, 'mirror'); });
-    if (cameraBtn) cameraBtn.addEventListener('click', (e) => { e.stopPropagation(); useRecent(item, 'camera'); });
-    card.querySelector('.recent-remove').addEventListener('click', (e) => {
-      e.stopPropagation();
-      saveRecents(loadRecents().filter(r => r.id !== item.id));
-      renderRecents();
-    });
-    recentsList.appendChild(card);
-  }
-}
-
-async function launchCamera(dev) {
-  if (!dev?.serial) return false;
-  const target = preferDeviceForCamera(dev);
-  const result = await window.api.launchScrcpy(target.serial, getCameraLaunchOptions());
-  if (result.ok) {
-    state.sessions[target.serial] = { model: target.model, brand: target.brand, mode: 'camera' };
-    rememberDevice(target);
-    updateSessionsUI();
-    renderDeviceCards(state.devices);
-    renderRecents();
-    showToast('Cámara iniciada', 'success');
-    return true;
-  }
-  showToast('Error cámara: ' + (result.error || 'desconocido'), 'error');
-  return false;
-}
-
-async function launchMirror(dev) {
-  if (!dev?.serial) return false;
-  const s = state.settings;
-  const result = await window.api.launchScrcpy(dev.serial, {
-    maxSize:   s.maxSize,
-    maxFps:    s.maxFps,
-    bitrate:   s.bitrate,
-    codec:     s.codec,
-    noAudio:   s.noAudio,
-    stayAwake: s.stayAwake,
-    screenOff: s.screenOff,
-    orientation: s.orientation ?? '0',
-  });
-
-  if (result.ok) {
-    state.sessions[dev.serial] = { model: dev.model, brand: dev.brand, mode: 'mirror' };
-    rememberDevice(dev);
-    updateSessionsUI();
-    renderDeviceCards(state.devices);
-    renderRecents();
-    showToast(`Mirror iniciado: ${dev.model || dev.serial}`, 'success');
-    return true;
-  }
-  showToast('Error al iniciar: ' + (result.error || 'desconocido'), 'error');
-  return false;
-}
-
-async function ensureRecentOnline(item) {
-  if (item.isWifi && item.host) {
-    showToast('Reconectando WiFi…', 'info');
-    const res = await window.api.connectWifi(item.host, item.port || '5555');
-    if (!res.ok) {
-      showToast(res.error || res.message || 'No se pudo reconectar', 'error');
-      return null;
-    }
-    await refreshDevices();
-    return state.devices.find(d => d.serial === item.serial) || {
-      serial: item.serial,
-      model: item.model,
-      brand: item.brand,
-      isWifi: true,
+  // ── 2. Selectores y DOM ────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  // Nav y Vistas
+  const navButtons = $$('.nav');
+  const views = $$('.view');
+  const sessionsBadge = $('sessionsBadge');
+  const appVersion = $('appVersion');
+
+  // Titlebar
+  const toolStatusPill = $('toolStatusPill');
+  const toolStatusText = $('toolStatusText');
+  const btnMin = $('btnMin');
+  const btnMax = $('btnMax');
+  const btnClose = $('btnClose');
+
+  // Dispositivos
+  const viewDevices = $('viewDevices');
+  const devicesList = $('devicesList');
+  const devicesEmpty = $('devicesEmpty');
+  const devicesAlert = $('devicesAlert');
+  const devicesAlertTitle = $('devicesAlertTitle');
+  const devicesAlertMsg = $('devicesAlertMsg');
+  const devicesAlertDetails = $('devicesAlertDetails');
+  const devicesAlertPre = $('devicesAlertPre');
+  const btnRescan = $('btnRescan');
+  const btnRefreshEmpty = $('btnRefreshEmpty');
+
+  // Wi-Fi
+  const usbDeviceSelect = $('usbDeviceSelect');
+  const btnEnableTcpip = $('btnEnableTcpip');
+  const pairEndpoint = $('pairEndpoint');
+  const pairCode = $('pairCode');
+  const btnPairWifi = $('btnPairWifi');
+  const wifiEndpoint = $('wifiEndpoint');
+  const btnConnectWifi = $('btnConnectWifi');
+  const recentsList = $('recentsList');
+  const recentsEmpty = $('recentsEmpty');
+
+  // En uso
+  const sessionsList = $('sessionsList');
+  const sessionsEmpty = $('sessionsEmpty');
+  const btnStopAll = $('btnStopAll');
+
+  // iPhone
+  const iphoneModeRadios = $$('input[name="iphoneMode"]');
+  const modeTitle = $('mode-title');
+  const modeSub = $('mode-sub');
+  const probeT = $('probe-t');
+  const probeS = $('probe-s');
+  const iphoneStateBadge = $('iphoneStateBadge');
+  const iphoneStateText = $('iphoneStateText');
+  const btnStartIphone = $('btnStartIphone');
+  const btnStartIphoneLabel = $('btnStartIphoneLabel');
+  const chkObsVirtualCam = $('chkObsVirtualCam');
+
+  // Ajustes
+  const presetRadios = $$('input[name="preset"]');
+  const selRes = $('res');
+  const sliderFps = $('fps');
+  const sliderBr = $('br');
+  const sliderZoom = $('zoom');
+  const codecRadios = $$('input[name="codec"]');
+  const facingRadios = $$('input[name="facing"]');
+  const rotRadios = $$('input[name="rot"]');
+  const chkTorch = $('cameraTorch');
+  const chkNoAudio = $('noAudio');
+  const chkStayAwake = $('stayAwake');
+  const chkScreenOff = $('screenOff');
+  const btnCheckUpdates = $('btnCheckUpdates');
+  const btnOpenGithub = $('btnOpenGithub');
+  const btnResetSettings = $('btnResetSettings');
+
+  // Modal y Toasts
+  const deviceModal = $('deviceModal');
+  const modalClose = $('modalClose');
+  const modalDeviceTitle = $('modalDeviceTitle');
+  const modalDeviceInfo = $('modalDeviceInfo');
+  const modalLaunch = $('modalLaunch');
+  const modalCamera = $('modalCamera');
+  const modalVirtualCamera = $('modalVirtualCamera');
+  const modalDisconnect = $('modalDisconnect');
+  const vcamDriverStatus = $('vcamDriverStatus');
+  const btnInstallVcam = $('btnInstallVcam');
+  const toastContainer = $('toastContainer');
+
+
+  // ── 3. Persistencia de Ajustes y Recientes ─────────────────────────
+  function defaultSettings() {
+    return {
+      maxSize: 1080,
+      maxFps: 30,
+      bitrate: 8,
+      codec: 'h264',
+      noAudio: true,
+      stayAwake: true,
+      screenOff: true,
+      cameraFacing: 'front',
+      orientation: '0',
+      cameraZoom: 1,
+      cameraTorch: false,
     };
   }
-  const found = state.devices.find(d => d.serial === item.serial);
-  if (!found) {
-    showToast('Conecta el dispositivo por USB e inténtalo de nuevo', 'error');
-    return null;
-  }
-  return found;
-}
 
-async function useRecent(item, mode = 'mirror') {
-  if (mode === 'stop' || state.sessions[item.serial]) {
-    if (state.sessions[item.serial]) {
-      await window.api.stopScrcpy(item.serial);
-      delete state.sessions[item.serial];
-      updateSessionsUI();
-      renderDeviceCards(state.devices);
-      renderRecents();
-      showToast('Sesión detenida', 'info');
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem('scrcpy_gui_settings');
+      return raw ? { ...defaultSettings(), ...JSON.parse(raw) } : defaultSettings();
+    } catch (_) {
+      return defaultSettings();
     }
-    return;
   }
 
-  const found = await ensureRecentOnline(item);
-  if (!found) return;
-  if (mode === 'camera') await launchCamera(found);
-  else await launchMirror(found);
-}
+  function saveSettings() {
+    try {
+      localStorage.setItem('scrcpy_gui_settings', JSON.stringify(state.settings));
+    } catch (_) {}
+  }
 
-if (btnClearRecents) {
-  btnClearRecents.addEventListener('click', () => {
-    saveRecents([]);
+  function loadRecents() {
+    try {
+      const raw = localStorage.getItem('scrcpy_gui_recents');
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveRecents() {
+    try {
+      localStorage.setItem('scrcpy_gui_recents', JSON.stringify(state.recents.slice(0, 8)));
+    } catch (_) {}
+  }
+
+  function rememberDevice(dev) {
+    if (!dev || !dev.serial) return;
+    state.recents = state.recents.filter((r) => r.serial !== dev.serial);
+    state.recents.unshift({
+      serial: dev.serial,
+      model: dev.model || dev.serial,
+      brand: dev.brand || 'Android',
+      isWifi: !!dev.isWifi,
+      ip: dev.ip || (dev.serial.includes(':') ? dev.serial.split(':')[0] : ''),
+      lastSeen: Date.now(),
+    });
+    saveRecents();
     renderRecents();
-    showToast('Recientes eliminados', 'info');
-  });
-}
-
-btnEnableTcpip.addEventListener('click', async () => {
-  const serial = usbDeviceSelect.value;
-  if (!serial) { showToast('Selecciona un dispositivo USB primero', 'error'); return; }
-
-  btnEnableTcpip.textContent = 'Activando…';
-  btnEnableTcpip.disabled = true;
-
-  const res = await window.api.enableTcpip(serial);
-  tcpipResult.style.display = 'block';
-
-  if (!res.ok) {
-    btnEnableTcpip.textContent = 'Activar y conectar';
-    btnEnableTcpip.disabled = false;
-    tcpipResult.className = 'result-box err';
-    tcpipResult.textContent = 'Error: ' + res.error;
-    return;
   }
 
-  if (!res.ip) {
-    btnEnableTcpip.textContent = 'Activar y conectar';
-    btnEnableTcpip.disabled = false;
-    tcpipResult.className = 'result-box warn';
-    tcpipResult.textContent = 'WiFi ADB en 5555, pero no se detectó la IP. Pégala en el paso 2 como IP:5555';
-    return;
+  // ── 4. Notificaciones Toast ───────────────────────────────────────
+  function showToast(message, type = 'info') {
+    if (!toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.style.transition = 'opacity .3s, transform .3s';
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
   }
 
-  setWifiEndpoint(res.ip, '5555');
-  const step2UsbSelect = $('step2UsbSelect');
-  if (step2UsbSelect) step2UsbSelect.value = `${res.ip}:5555`;
-  btnEnableTcpip.textContent = 'Conectando…';
-  const conn = await window.api.connectWifi(res.ip, '5555');
+  function showAlert(title, msg, details) {
+    if (!devicesAlert) return;
+    devicesAlertTitle.textContent = title;
+    devicesAlertMsg.textContent = msg;
+    if (details) {
+      devicesAlertPre.textContent = details;
+      devicesAlertDetails.style.display = 'block';
+    } else {
+      devicesAlertDetails.style.display = 'none';
+    }
+    devicesAlert.style.display = 'flex';
+  }
 
-  btnEnableTcpip.textContent = 'Activar y conectar';
-  btnEnableTcpip.disabled = false;
+  function hideAlert() {
+    if (devicesAlert) devicesAlert.style.display = 'none';
+  }
 
-  if (conn.ok) {
-    tcpipResult.className = 'result-box ok';
-    tcpipResult.textContent = `Listo: ${res.ip}:5555 conectado. Ya puedes quitar el cable y usar Recientes → Cámara.`;
-    showToast(`WiFi listo · ${res.ip}:5555`, 'success');
-    await refreshDevices();
-    const found = state.devices.find(d => d.serial === `${res.ip}:5555`);
-    if (found) rememberDevice(found);
-    else {
-      rememberDevice({
-        serial: `${res.ip}:5555`,
-        model: 'Dispositivo',
-        brand: '',
-        isWifi: true,
+  // ── 5. Formateadores y Utilidades ─────────────────────────────────
+  function escHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderBattBar(levelStr) {
+    const level = parseInt(levelStr, 10) || 0;
+    const filled = Math.min(Math.max(Math.round(level / 20), 0), 5);
+    let html = '';
+    for (let i = 0; i < 5; i++) {
+      html += i < filled ? '<span></span>' : '<span class="off"></span>';
+    }
+    return html;
+  }
+
+  function formatDuration(startedAt) {
+    if (!startedAt) return '00:00:00';
+    const totalSec = Math.floor((Date.now() - startedAt) / 1000);
+    const hrs = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+    const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+    const secs = String(totalSec % 60).padStart(2, '0');
+    return `${hrs}:${mins}:${secs}`;
+  }
+
+  function paintSlider(range) {
+    if (!range) return;
+    const min = parseFloat(range.min) || 0;
+    const max = parseFloat(range.max) || 100;
+    const val = parseFloat(range.value) || 0;
+    const pct = ((val - min) / (max - min)) * 100;
+    range.style.setProperty('--fill', `${pct}%`);
+    const output = range.parentElement.querySelector('output');
+    if (output) {
+      const dec = parseInt(range.dataset.dec, 10) || 0;
+      const unit = range.dataset.unit || '';
+      output.textContent = `${val.toFixed(dec)}${unit}`;
+    }
+  }
+
+  // ── 6. Navegación por Pestañas ─────────────────────────────────────
+  function setupNavigation() {
+    navButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const targetView = btn.dataset.view;
+        navButtons.forEach((b) => b.removeAttribute('aria-current'));
+        btn.setAttribute('aria-current', 'page');
+        views.forEach((v) => {
+          v.hidden = v.dataset.view !== targetView;
+        });
+      });
+    });
+  }
+
+  // ── 7. Titlebar & Control de Ventana ───────────────────────────────
+  function setupTitlebar() {
+    if (btnMin) btnMin.addEventListener('click', () => window.api.minimize());
+    if (btnMax) btnMax.addEventListener('click', () => window.api.maximize());
+    if (btnClose) btnClose.addEventListener('click', () => window.api.close());
+
+    updateToolStatus();
+  }
+
+  async function updateToolStatus() {
+    try {
+      const status = await window.api.getToolsStatus();
+      if (status.scrcpy && status.adb) {
+        toolStatusPill.dataset.state = 'ok';
+        toolStatusText.textContent = 'Todo listo';
+        toolStatusPill.title = 'scrcpy y ADB funcionando';
+      } else if (status.adb && !status.scrcpy) {
+        toolStatusPill.dataset.state = 'warn';
+        toolStatusText.textContent = 'Falta scrcpy';
+        toolStatusPill.title = 'No se encontró scrcpy.exe en vendor/scrcpy/ ni en PATH';
+      } else {
+        toolStatusPill.dataset.state = 'error';
+        toolStatusText.textContent = 'Falta ADB';
+        toolStatusPill.title = 'No se encontró adb.exe';
+      }
+    } catch (_) {
+      toolStatusPill.dataset.state = 'warn';
+      toolStatusText.textContent = 'Desconectado';
+    }
+  }
+
+  // ── 8. Renderizado de Dispositivos ────────────────────────────────
+  function renderDeviceCards() {
+    if (!devicesList) return;
+    devicesList.innerHTML = '';
+
+    const devices = state.devices;
+    const hasDevices = devices && devices.length > 0;
+
+    if (!hasDevices) {
+      viewDevices.classList.add('is-empty');
+      return;
+    }
+
+    viewDevices.classList.remove('is-empty');
+
+    devices.forEach((dev) => {
+      const isRunning = !!state.sessions[dev.serial];
+      const isVcamRunning = state.vcam && state.vcam.running && state.vcam.serial === dev.serial;
+      const session = state.sessions[dev.serial] || {};
+      const card = document.createElement('article');
+      card.className = 'device';
+      card.dataset.serial = dev.serial;
+      card.dataset.live = (isRunning || isVcamRunning) ? 'true' : 'false';
+
+      card.innerHTML = `
+        <div class="device-top">
+          <div class="thumb"><svg class="ico"><use href="#i-phone"/></svg></div>
+          <div>
+            <h3>${escHtml(dev.brand ? `${dev.brand} ${dev.model}` : dev.model || dev.serial)}</h3>
+            <span class="serial mono">${escHtml(dev.serial)}</span>
+          </div>
+          <button class="btn btn-icon btn-ghost btn-more" aria-label="Más opciones" title="Más opciones">
+            <svg class="ico"><use href="#i-more"/></svg>
+          </button>
+        </div>
+        <div class="meta">
+          <span class="chip">
+            <svg class="ico"><use href="${dev.isWifi ? '#i-wifi' : '#i-usb'}"/></svg>
+            ${dev.isWifi ? 'Wi-Fi' : 'USB'}
+          </span>
+          ${dev.androidVersion ? `<span class="chip">Android ${escHtml(dev.androidVersion)}</span>` : ''}
+          ${dev.batteryLevel ? `
+          <span class="batt">
+            <span class="batt-bar" aria-hidden="true">${renderBattBar(dev.batteryLevel)}</span>
+            ${escHtml(dev.batteryLevel)}%
+          </span>` : ''}
+          ${isVcamRunning ? `<span class="chip" style="color:var(--accent);border-color:var(--accent)">DirectShow OBS Activo</span>` : ''}
+          ${renderHealthChip(dev.serial)}
+          ${(state.reconnecting || {})[dev.serial] ? `<span class="chip temp warm">Reconectando…</span>` : ''}
+        </div>
+        <div class="live-strip">
+          <span class="tag"><span class="led"></span>${isVcamRunning ? 'Webcam OBS' : 'En vivo'}</span>
+          <span class="readout mono">
+            <span class="session-res">${isVcamRunning ? (state.vcam.resolution || '1920x1080').replace('x', '×') : (session.resolution || '1080×2400')}</span>
+            <span${isVcamRunning ? ` class="vcam-fps" title="Decodificados: ${state.vcam.decodedFps ?? '—'} fps · Descartados (2 s): ${state.vcam.dropped ?? '—'}"` : ''}>${isVcamRunning ? (state.vcam.fps ? state.vcam.fps : '—') : (session.fps || state.settings.maxFps || 30)} fps</span>
+            <span class="session-timer">${formatDuration(session.startedAt)}</span>
+          </span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary go">
+            <svg class="ico"><use href="#i-monitor"/></svg>Ver pantalla
+          </button>
+          <button class="btn btn-danger stop">
+            <svg class="ico"><use href="#i-stop"/></svg>Detener
+          </button>
+          <button class="btn btn-icon btn-cam" aria-label="Cámara en ventana" title="Cámara en ventana">
+            <svg class="ico"><use href="#i-camera"/></svg>
+          </button>
+          <button class="btn btn-icon btn-vcam ${isVcamRunning ? 'btn-danger' : ''}" aria-label="Cámara Virtual DirectShow (OBS / Windows)" title="${isVcamRunning ? 'Detener Cámara Virtual DirectShow' : 'Iniciar Cámara Virtual DirectShow (OBS / Windows)'}">
+            <svg class="ico"><use href="${isVcamRunning ? '#i-stop' : '#i-vcam'}"/></svg>
+          </button>
+        </div>
+      `;
+
+      // Eventos directos
+      card.querySelector('.go').addEventListener('click', () => launchSession(dev.serial, 'mirror'));
+      card.querySelector('.stop').addEventListener('click', () => stopSession(dev.serial));
+      card.querySelector('.btn-cam').addEventListener('click', () => launchSession(dev.serial, 'camera'));
+      card.querySelector('.btn-vcam').addEventListener('click', () => toggleVirtualCam(dev.serial));
+      card.querySelector('.btn-more').addEventListener('click', () => openDeviceModal(dev));
+
+      devicesList.appendChild(card);
+    });
+
+
+    populateUsbSelect();
+  }
+
+  function populateUsbSelect() {
+    if (!usbDeviceSelect) return;
+    const currentVal = usbDeviceSelect.value;
+    usbDeviceSelect.innerHTML = '<option value="">Elige un teléfono conectado por cable</option>';
+
+    const usbDevs = state.devices.filter((d) => !d.isWifi);
+    usbDevs.forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d.serial;
+      opt.textContent = `${d.brand || ''} ${d.model || d.serial} (${d.serial})`.trim();
+      usbDeviceSelect.appendChild(opt);
+    });
+
+    if (usbDevs.length > 0) {
+      usbDeviceSelect.value = currentVal || usbDevs[0].serial;
+    }
+  }
+
+  // ── 9. En Uso (Sesiones Activas) ──────────────────────────────────
+  function renderSessionsUI() {
+    if (!sessionsList) return;
+    sessionsList.innerHTML = '';
+
+    const sessionSerials = Object.keys(state.sessions);
+    const count = sessionSerials.length;
+
+    // Actualizar badge en la navegación
+    if (sessionsBadge) {
+      sessionsBadge.textContent = count;
+      sessionsBadge.style.display = count > 0 ? 'grid' : 'none';
+    }
+
+    if (count === 0) {
+      if (sessionsEmpty) sessionsEmpty.style.display = 'block';
+      if (btnStopAll) btnStopAll.style.display = 'none';
+      return;
+    }
+
+    if (sessionsEmpty) sessionsEmpty.style.display = 'none';
+    if (btnStopAll) btnStopAll.style.display = 'inline-flex';
+
+    sessionSerials.forEach((serial) => {
+      const session = state.sessions[serial];
+      const dev = state.devices.find((d) => d.serial === serial) || { serial };
+      const isCam = session.mode === 'camera';
+
+      const card = document.createElement('article');
+      card.className = 'device session';
+      card.dataset.live = 'true';
+      card.innerHTML = `
+        <div class="device-top">
+          <div class="thumb"><svg class="ico"><use href="#i-phone"/></svg></div>
+          <div>
+            <h3>${escHtml(dev.brand ? `${dev.brand} ${dev.model}` : dev.model || serial)}</h3>
+            <span class="serial mono">${escHtml(serial)}</span>
+          </div>
+        </div>
+        <div class="meta">
+          <span class="chip">
+            <svg class="ico"><use href="${isCam ? '#i-camera' : '#i-monitor'}"/></svg>
+            ${isCam ? 'Cámara' : 'Pantalla'}
+          </span>
+          <span class="chip">
+            <svg class="ico"><use href="${dev.isWifi ? '#i-wifi' : '#i-usb'}"/></svg>
+            ${dev.isWifi ? 'Wi-Fi' : 'USB'}
+          </span>
+        </div>
+        <div class="live-strip" style="display:flex">
+          <span class="tag"><span class="led"></span>En vivo</span>
+          <span class="readout mono">
+            <span class="session-res">${session.resolution || '1080×2400'}</span>
+            <span>${session.fps || state.settings.maxFps || 30} fps</span>
+            <span class="session-timer">${formatDuration(session.startedAt)}</span>
+          </span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-danger stop">
+            <svg class="ico"><use href="#i-stop"/></svg>Detener
+          </button>
+        </div>
+      `;
+
+      card.querySelector('.stop').addEventListener('click', () => stopSession(serial));
+      sessionsList.appendChild(card);
+    });
+  }
+
+  // ── 10. Lista de Dispositivos Recientes (Wi-Fi) ───────────────────
+  function renderRecents() {
+    if (!recentsList) return;
+    recentsList.innerHTML = '';
+
+    if (!state.recents || state.recents.length === 0) {
+      if (recentsEmpty) recentsEmpty.style.display = 'block';
+      return;
+    }
+
+    if (recentsEmpty) recentsEmpty.style.display = 'none';
+
+    state.recents.forEach((item) => {
+      const div = document.createElement('div');
+      div.className = 'recent-item';
+      div.innerHTML = `
+        <svg class="ico"><use href="#i-wifi"/></svg>
+        <b>${escHtml(item.model || item.serial)}</b>
+        <span class="mono">${escHtml(item.serial)}</span>
+        <button class="btn btn-reconnect">Reconectar</button>
+      `;
+
+      div.querySelector('.btn-reconnect').addEventListener('click', async () => {
+        const target = item.serial;
+        const [ip, port] = target.split(':');
+        showToast(`Conectando a ${item.model || target}…`, 'info');
+        const res = await window.api.connectWifi(ip, port || '5555');
+        if (res.ok) {
+          showToast(`Conectado a ${item.model || target}`, 'success');
+          refreshDevices();
+        } else {
+          showToast(`Error al conectar: ${res.error || res.message}`, 'error');
+        }
+      });
+
+      recentsList.appendChild(div);
+    });
+  }
+
+  // ── 11. Lanzamiento y Control de scrcpy ────────────────────────────
+  function getLaunchOptions(mode = 'mirror') {
+    const s = state.settings;
+    const isCamera = mode === 'camera';
+    return {
+      windowTitle: isCamera ? 'scrcpy Cámara' : 'scrcpy',
+      cameraOnly: isCamera,
+      cameraFacing: s.cameraFacing || 'front',
+      maxFps: s.maxFps || 30,
+      maxSize: s.maxSize ?? 1080, // 0 = Original (no usar ||)
+      cameraZoom: s.cameraZoom || 1,
+      cameraTorch: !!s.cameraTorch,
+      noAudio: isCamera ? true : !!s.noAudio,
+      stayAwake: !!s.stayAwake,
+      screenOff: !!s.screenOff,
+      bitrate: s.bitrate || 8,
+      codec: s.codec || 'h264',
+      orientation: s.orientation || '0',
+    };
+  }
+
+  async function launchSession(serial, mode = 'mirror') {
+    const dev = state.devices.find((d) => d.serial === serial);
+    const opts = getLaunchOptions(mode);
+
+    showToast(`Iniciando ${mode === 'camera' ? 'cámara' : 'pantalla'}…`, 'info');
+    hideAlert();
+
+    const res = await window.api.launchScrcpy(serial, opts);
+    if (res.ok) {
+      const p = res.profile;
+      const rot = p && (p.orientation === 90 || p.orientation === 270);
+      state.sessions[serial] = {
+        serial,
+        mode,
+        startedAt: Date.now(),
+        resolution: p ? (rot ? `${p.height}×${p.width}` : `${p.width}×${p.height}`) : '1080×2400',
+        fps: p ? p.fps : opts.maxFps,
+        pid: res.pid,
+      };
+      if (dev) rememberDevice(dev);
+      if (p) {
+        showProfileNotes(p, 'Cámara lista');
+      } else {
+        showToast(`${mode === 'camera' ? 'Cámara' : 'Pantalla'} lista`, 'success');
+      }
+      renderDeviceCards();
+      renderSessionsUI();
+    } else {
+      showToast(`Error al iniciar scrcpy: ${res.error}`, 'error');
+      showAlert('Fallo al iniciar sesión en el teléfono', res.error, res.error);
+    }
+  }
+
+  async function stopSession(serial) {
+    delete state.sessions[serial];
+    renderDeviceCards();
+    renderSessionsUI();
+    await window.api.stopScrcpy(serial);
+    showToast('Sesión detenida', 'info');
+  }
+
+  async function stopAllSessions() {
+    const serials = Object.keys(state.sessions);
+    state.sessions = {};
+    renderDeviceCards();
+    renderSessionsUI();
+    for (const s of serials) {
+      await window.api.stopScrcpy(s);
+    }
+    showToast('Todas las sesiones detenidas', 'info');
+  }
+
+  // ── 12.5 Cámara Virtual DirectShow (OBS / Windows) ─────────────────
+  async function updateVcamStatus() {
+    try {
+      const status = await window.api.vcamGetStatus();
+      if (!status) return;
+      state.vcam.running = !!status.running;
+      state.vcam.serial = status.serial || null;
+      state.vcam.isDriverInstalled = !!status.isDriverInstalled;
+      state.vcam.fps = status.fps || 0;
+
+      if (vcamDriverStatus) {
+        if (state.vcam.isDriverInstalled) {
+          vcamDriverStatus.className = 'chip';
+          vcamDriverStatus.style.color = 'var(--primary)';
+          vcamDriverStatus.style.borderColor = 'var(--primary)';
+          vcamDriverStatus.textContent = 'Instalado ("Unity Video Capture")';
+          if (btnInstallVcam) btnInstallVcam.textContent = 'Reinstalar Driver';
+        } else {
+          vcamDriverStatus.className = 'chip';
+          vcamDriverStatus.style.color = 'var(--warn)';
+          vcamDriverStatus.style.borderColor = 'var(--warn)';
+          vcamDriverStatus.textContent = 'No instalado';
+          if (btnInstallVcam) btnInstallVcam.textContent = 'Instalar Driver DirectShow';
+        }
+      }
+      renderDeviceCards();
+    } catch (err) {
+      console.error('[vcam] Error al obtener estado:', err);
+    }
+  }
+
+  async function toggleVirtualCam(serial) {
+    if (state.vcam.running && state.vcam.serial === serial) {
+      await window.api.vcamStop();
+      state.vcam.running = false;
+      state.vcam.serial = null;
+      renderDeviceCards();
+      showToast('Cámara Virtual detenida', 'info');
+      return;
+    }
+
+    if (!state.vcam.isDriverInstalled) {
+      const ok = confirm(
+        'El Driver DirectShow no está instalado en Windows aún.\n\n' +
+        '¿Deseas registrarlo ahora? (Aparecerá el aviso de Administrador de Windows para registrar "Unity Video Capture")'
+      );
+      if (ok) {
+        await window.api.vcamInstallDriver();
+        showToast('Abriendo instalador del driver con permisos de Administrador…', 'info');
+        setTimeout(updateVcamStatus, 4000);
+      }
+      return;
+    }
+
+    showToast('Iniciando Cámara Virtual DirectShow…', 'info');
+    state.vcam.fps = 0;
+    state.vcam.decodedFps = undefined;
+    state.vcam.dropped = undefined;
+    // Mismos ajustes que la cámara en ventana; el backend los adapta al teléfono.
+    const res = await window.api.vcamStart(serial, getLaunchOptions('camera'));
+
+    if (res && res.ok) {
+      state.vcam.running = true;
+      state.vcam.serial = serial;
+      state.vcam.profile = res.profile || null;
+      if (res.profile) {
+        const p = res.profile;
+        const rot = p.orientation === 90 || p.orientation === 270;
+        state.vcam.resolution = rot ? `${p.height}x${p.width}` : `${p.width}x${p.height}`;
+      }
+      renderDeviceCards();
+      showProfileNotes(res.profile, 'Cámara Virtual activa en "Unity Video Capture"');
+    } else {
+      showToast('Error iniciando cámara virtual: ' + (res?.error || 'Desconocido'), 'error');
+    }
+  }
+
+  // ── 13. Modal de Dispositivo ───────────────────────────────────────
+
+  function openDeviceModal(dev) {
+    state.selectedDevice = dev;
+    if (!deviceModal) return;
+
+    modalDeviceTitle.textContent = `${dev.brand || ''} ${dev.model || 'Dispositivo'}`.trim();
+    modalDeviceInfo.innerHTML = `
+      <div style="display:flex;align-items:center;gap:var(--s3);margin:var(--s2) 0">
+        <div class="thumb"><svg class="ico"><use href="#i-phone"/></svg></div>
+        <div>
+          <b style="font-size:14px">${escHtml(dev.model || dev.serial)}</b>
+          <p class="mono" style="color:var(--text-3);margin-top:2px">${escHtml(dev.serial)}</p>
+        </div>
+      </div>
+      <div class="meta" style="margin-bottom:var(--s3)">
+        <span class="chip"><svg class="ico"><use href="${dev.isWifi ? '#i-wifi' : '#i-usb'}"/></svg>${dev.isWifi ? 'Wi-Fi' : 'USB'}</span>
+        ${dev.androidVersion ? `<span class="chip">Android ${escHtml(dev.androidVersion)}</span>` : ''}
+        ${dev.batteryLevel ? `<span class="chip">Batería ${escHtml(dev.batteryLevel)}%</span>` : ''}
+      </div>
+    `;
+
+    deviceModal.classList.add('active');
+  }
+
+  function closeDeviceModal() {
+    if (deviceModal) deviceModal.classList.remove('active');
+  }
+
+  function setupModal() {
+    if (modalClose) modalClose.addEventListener('click', closeDeviceModal);
+    if (deviceModal) {
+      deviceModal.addEventListener('click', (e) => {
+        if (e.target === deviceModal) closeDeviceModal();
       });
     }
-  } else {
-    tcpipResult.className = 'result-box err';
-    tcpipResult.textContent = `ADB en 5555 OK (${res.ip}), pero falló conectar: ${conn.error || conn.message || ''}. ¿VPN activo?`;
-    showToast('Activa ADB OK; conexión WiFi falló (revisa VPN)', 'error');
+
+    if (modalLaunch) {
+      modalLaunch.addEventListener('click', () => {
+        if (state.selectedDevice) {
+          closeDeviceModal();
+          launchSession(state.selectedDevice.serial, 'mirror');
+        }
+      });
+    }
+
+    if (modalCamera) {
+      modalCamera.addEventListener('click', () => {
+        if (state.selectedDevice) {
+          closeDeviceModal();
+          launchSession(state.selectedDevice.serial, 'camera');
+        }
+      });
+    }
+
+    if (modalVirtualCamera) {
+      modalVirtualCamera.addEventListener('click', () => {
+        if (state.selectedDevice) {
+          const serial = state.selectedDevice.serial;
+          closeDeviceModal();
+          toggleVirtualCam(serial);
+        }
+      });
+    }
+
+
+    if (modalDisconnect) {
+      modalDisconnect.addEventListener('click', async () => {
+        if (state.selectedDevice) {
+          const serial = state.selectedDevice.serial;
+          closeDeviceModal();
+          await stopSession(serial);
+          if (state.selectedDevice.isWifi) {
+            await window.api.disconnect(serial);
+            showToast('Dispositivo Wi-Fi desconectado', 'info');
+            refreshDevices();
+          }
+        }
+      });
+    }
   }
-});
 
-btnPairWifi.addEventListener('click', async () => {
-  const ep = parseEndpoint(pairEndpoint.value);
-  const code = pairCode.value.trim().replace(/\s+/g, '');
-  if (!ep || !ep.hasPort) {
-    showToast('Pega IP:puerto de vinculación (el puerto es obligatorio)', 'error');
-    return;
+  // ── 13. Funciones Wi-Fi ───────────────────────────────────────────
+  function setupWifi() {
+    if (btnEnableTcpip) {
+      btnEnableTcpip.addEventListener('click', async () => {
+        const serial = usbDeviceSelect.value;
+        if (!serial) {
+          showToast('Selecciona un teléfono conectado por cable', 'warn');
+          return;
+        }
+        btnEnableTcpip.disabled = true;
+        showToast('Activando modo Wi-Fi (:5555)…', 'info');
+        const res = await window.api.enableTcpip(serial);
+        btnEnableTcpip.disabled = false;
+        if (res.ok && res.ip) {
+          showToast(`Modo Wi-Fi listo en ${res.ip}. Conectando…`, 'info');
+          const conn = await window.api.connectWifi(res.ip, '5555');
+          if (conn.ok) {
+            showToast('Conectado por Wi-Fi. Ya puedes quitar el cable.', 'success');
+            refreshDevices();
+          } else {
+            showToast(`Activado pero no conectó: ${conn.error}`, 'warn');
+          }
+        } else {
+          showToast(`Error al activar Wi-Fi: ${res.error || 'Fallo desconocido'}`, 'error');
+        }
+      });
+    }
+
+    if (btnPairWifi) {
+      btnPairWifi.addEventListener('click', async () => {
+        const ep = (pairEndpoint.value || '').trim();
+        const code = (pairCode.value || '').trim();
+        if (!ep || !code) {
+          showToast('Introduce la dirección de vinculación y el código', 'warn');
+          return;
+        }
+        const [host, port] = ep.split(':');
+        btnPairWifi.disabled = true;
+        showToast('Vinculando dispositivo…', 'info');
+        const res = await window.api.pairWifi(host, port || '5555', code);
+        btnPairWifi.disabled = false;
+        if (res.ok) {
+          showToast('Dispositivo vinculado correctamente', 'success');
+        } else {
+          showToast(`Error al vincular: ${res.error || res.message}`, 'error');
+        }
+      });
+    }
+
+    if (btnConnectWifi) {
+      btnConnectWifi.addEventListener('click', async () => {
+        const ep = (wifiEndpoint.value || '').trim();
+        if (!ep) {
+          showToast('Introduce la dirección del teléfono', 'warn');
+          return;
+        }
+        const [ip, port] = ep.split(':');
+        btnConnectWifi.disabled = true;
+        showToast(`Conectando a ${ep}…`, 'info');
+        const res = await window.api.connectWifi(ip, port || '5555');
+        btnConnectWifi.disabled = false;
+        if (res.ok) {
+          showToast('Conectado por Wi-Fi con éxito', 'success');
+          wifiEndpoint.value = '';
+          refreshDevices();
+        } else {
+          showToast(`Error al conectar: ${res.error || res.message}`, 'error');
+        }
+      });
+    }
   }
-  if (!/^\d{6}$/.test(code)) {
-    showToast('El código debe tener 6 dígitos', 'error');
-    return;
-  }
 
-  btnPairWifi.textContent = 'Vinculando…';
-  btnPairWifi.disabled = true;
-  const res = await window.api.pairWifi(ep.ip, ep.port, code);
-  btnPairWifi.textContent = 'Vincular';
-  btnPairWifi.disabled = false;
-
-  pairResult.style.display = 'block';
-  if (res.ok) {
-    pairResult.className = 'result-box ok';
-    pairResult.textContent = 'Vinculado. Ahora pega en el paso 2 la IP:puerto de Depuración inalámbrica (no el de vinculación).';
-    showToast('Dispositivo vinculado', 'success');
-    pairCode.value = '';
-  } else {
-    pairResult.className = 'result-box err';
-    pairResult.textContent = res.error || res.message || 'No se pudo vincular';
-  }
-});
-
-btnConnectWifi.addEventListener('click', async () => {
-  const raw = (wifiEndpoint && wifiEndpoint.value.trim()) || '';
-  const ep = parseEndpoint(raw) || parseEndpoint(`${wifiIp.value.trim()}:${wifiPort.value.trim() || '5555'}`);
-  if (!ep) { showToast('Pega una dirección válida, ej. 192.168.1.6:41759', 'error'); return; }
-
-  setWifiEndpoint(ep.ip, ep.port);
-  btnConnectWifi.textContent = 'Conectando…';
-  btnConnectWifi.disabled = true;
-
-  const res = await window.api.connectWifi(ep.ip, ep.port);
-  btnConnectWifi.textContent = 'Conectar';
-  btnConnectWifi.disabled = false;
-
-  wifiConnectResult.style.display = 'block';
-  if (res.ok) {
-    wifiConnectResult.className = 'result-box ok';
-    wifiConnectResult.textContent = res.message || 'Conectado';
-    showToast('Conectado por WiFi', 'success');
-    try { localStorage.setItem('scrcpy-last-wifi-endpoint', `${ep.ip}:${ep.port}`); } catch (_) {}
-    rememberDevice({
-      serial: res.serial || `${ep.ip}:${ep.port}`,
-      model: 'Dispositivo',
-      brand: '',
-      isWifi: true,
+  // ── 14. Funciones iPhone ──────────────────────────────────────────
+  function setupIphone() {
+    iphoneModeRadios.forEach((radio) => {
+      radio.addEventListener('change', () => {
+        state.iphoneMode = radio.value;
+        const isUsb = radio.value === 'usb';
+        modeTitle.textContent = isUsb ? 'Cámara por cable USB' : 'Pantalla por AirPlay';
+        modeSub.textContent = isUsb
+          ? 'Imagen en alta calidad y sin retraso'
+          : 'Comparte la pantalla del iPhone sin cables';
+        probeT.textContent = isUsb
+          ? 'Buscando iPhone conectado por cable…'
+          : 'Esperando al iPhone en AirPlay…';
+        probeS.textContent = isUsb
+          ? 'Conecta tu iPhone al PC con el cable y desbloquéalo'
+          : 'En el iPhone abre el Centro de control y elige “Duplicar pantalla”';
+      });
     });
-    setTimeout(async () => {
-      await refreshDevices();
-      const found = state.devices.find(d => d.serial === (res.serial || `${ep.ip}:${ep.port}`));
-      if (found) rememberDevice(found);
-    }, 800);
-  } else {
-    wifiConnectResult.className = 'result-box err';
-    wifiConnectResult.textContent = res.error || res.message || 'Error de conexión';
-  }
-});
 
-// Allow pasting "IP:port" into endpoint and Enter to connect
-if (wifiEndpoint) {
-  wifiEndpoint.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') btnConnectWifi.click();
-  });
-}
-const step2UsbSelect = $('step2UsbSelect');
-if (step2UsbSelect) {
-  step2UsbSelect.addEventListener('change', () => {
-    const val = step2UsbSelect.value;
-    if (val) {
-      const ep = parseEndpoint(val);
-      if (ep) {
-        setWifiEndpoint(ep.ip, ep.port);
-      } else {
-        if (wifiEndpoint) wifiEndpoint.value = val;
-      }
+    if (btnStartIphone) {
+      btnStartIphone.addEventListener('click', async () => {
+        if (state.iphoneRunning) {
+          btnStartIphone.disabled = true;
+          if (state.iphoneMode === 'usb') {
+            await window.api.iphoneUsbStopStream();
+          } else {
+            await window.api.iphoneStopUxPlay();
+          }
+          btnStartIphone.disabled = false;
+          state.iphoneRunning = false;
+          btnStartIphoneLabel.textContent = 'Iniciar';
+          iphoneStateBadge.dataset.state = '';
+          iphoneStateText.textContent = 'Detenido';
+          showToast('iPhone detenido', 'info');
+        } else {
+          btnStartIphone.disabled = true;
+          if (state.iphoneMode === 'usb') {
+            const res = await window.api.iphoneUsbStartStream();
+            btnStartIphone.disabled = false;
+            if (res.ok) {
+              state.iphoneRunning = true;
+              btnStartIphoneLabel.textContent = 'Detener';
+              iphoneStateBadge.dataset.state = 'ok';
+              iphoneStateText.textContent = 'Transmitiendo por USB';
+              showToast(res.message || 'Túnel USB listo', 'success');
+            } else {
+              showToast(res.error, 'error');
+            }
+          } else {
+            const res = await window.api.iphoneStartUxPlay();
+            btnStartIphone.disabled = false;
+            if (res.ok) {
+              state.iphoneRunning = true;
+              btnStartIphoneLabel.textContent = 'Detener';
+              iphoneStateBadge.dataset.state = 'ok';
+              iphoneStateText.textContent = 'AirPlay activo';
+              showToast('UxPlay iniciado para AirPlay', 'success');
+            } else {
+              showToast(res.error, 'error');
+            }
+          }
+        }
+      });
     }
-  });
-}
-if (pairCode) {
-  pairCode.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') btnPairWifi.click();
-  });
-}
 
-// ── Sessions UI ────────────────────────────────────────────────
-function updateSessionsUI() {
-  const serials = Object.keys(state.sessions);
-  const badge = $('sessionsBadge');
-  badge.style.display = serials.length > 0 ? 'inline' : 'none';
-  badge.textContent   = serials.length;
-
-  if (serials.length === 0) {
-    sessionsList.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        </div>
-        <h3>Sin sesiones activas</h3>
-        <p>Inicia scrcpy desde la sección de Dispositivos.</p>
-      </div>`;
-    return;
+    if (chkObsVirtualCam) {
+      chkObsVirtualCam.addEventListener('change', async () => {
+        const start = chkObsVirtualCam.checked;
+        const res = await window.api.iphoneObsVirtualCam({ start });
+        if (res.ok) {
+          showToast(res.message || (start ? 'OBS Virtual Cam iniciada' : 'OBS Virtual Cam detenida'), 'info');
+        } else {
+          showToast(res.error, 'warn');
+        }
+      });
+    }
   }
 
-  sessionsList.innerHTML = '';
-  for (const serial of serials) {
-    const s = state.sessions[serial];
-    const modeLabel = s.mode === 'camera' ? ' · Cámara' : s.mode === 'record' ? ' · Grabación' : ' · Mirror';
-    const card = document.createElement('div');
-    card.className = 'session-card';
-    card.innerHTML = `
-      <div class="session-pulse"></div>
-      <div class="session-info">
-        <div class="session-device">${escHtml((s.brand || '') + ' ' + (s.model || 'Dispositivo'))}</div>
-        <div class="session-serial">${escHtml(serial)}${modeLabel}</div>
-      </div>
-      <button class="btn-stop" data-serial="${escHtml(serial)}">⏹ Detener</button>
-    `;
-    card.querySelector('.btn-stop').addEventListener('click', async () => {
-      await window.api.stopScrcpy(serial);
-      delete state.sessions[serial];
-      updateSessionsUI();
-      renderDeviceCards(state.devices);
-      showToast('Mirror detenido', 'info');
+  // ── 15. Ajustes y Presets ─────────────────────────────────────────
+  function setupSettings() {
+    // Sliders en tiempo real con degradado
+    [sliderFps, sliderBr, sliderZoom].forEach((s) => {
+      if (!s) return;
+      paintSlider(s);
+      s.addEventListener('input', () => {
+        paintSlider(s);
+        commitSettingsFromUI();
+      });
     });
-    sessionsList.appendChild(card);
-  }
-}
 
-// ── Listen for scrcpy exiting ──────────────────────────────────
-window.api?.onScrcpyStopped?.(({ serial, error, earlyFail }) => {
-  if (state.restartingSerials.has(serial)) return;
-  if (state.sessions[serial]) {
-    const name = (state.sessions[serial].model || serial);
-    delete state.sessions[serial];
-    updateSessionsUI();
-    renderDeviceCards(state.devices);
-    renderRecents();
-    if (error) {
-      const short = String(error).split('\n').filter(Boolean).slice(-2).join(' · ');
-      showToast(`Error scrcpy (${name}): ${short.slice(0, 180)}`, 'error');
-    } else {
-      showToast(`Sesión de ${name} terminó`, 'info');
+    if (selRes) {
+      selRes.addEventListener('change', commitSettingsFromUI);
     }
-  } else if (error && earlyFail) {
-    showToast(`Error scrcpy: ${String(error).slice(0, 180)}`, 'error');
-  }
-});
 
-// Atajos
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'F5') {
-    e.preventDefault();
-    refreshDevices();
-  }
-  if (e.key === 'Escape' && deviceModal?.style.display === 'flex') {
-    deviceModal.style.display = 'none';
-  }
-});
-
-// ── Toast ──────────────────────────────────────────────────────
-function showToast(msg, type = 'info') {
-  const container = $('toastContainer');
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  const icons = { success: '✓', error: '✕', info: 'ℹ' };
-  toast.innerHTML = `<span>${icons[type] || 'ℹ'}</span><span>${escHtml(msg)}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('hide');
-    setTimeout(() => toast.remove(), 250);
-  }, 3500);
-}
-
-// ── Utilities ──────────────────────────────────────────────────
-function escHtml(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// ── App info / updates ─────────────────────────────────────────
-let appInfoCache = null;
-
-async function loadAppInfo() {
-  appInfoCache = await window.api.getAppInfo();
-  const ver = appInfoCache?.version || '?';
-  const label = $('appVersionLabel');
-  if (label) label.textContent = `v${ver}`;
-  const about = $('aboutText');
-  if (about) {
-    const author = appInfoCache?.author && !String(appInfoCache.author).includes('TU_')
-      ? ` · ${appInfoCache.author}`
-      : '';
-    about.textContent = `${appInfoCache?.name || 'scrcpy GUI'} v${ver}${author}. Puedes publicar mejoras en GitHub Releases y esta app las detectará.`;
-  }
-  return appInfoCache;
-}
-
-async function checkForUpdates({ silent = false } = {}) {
-  const box = $('updateResult');
-  const btn = $('btnCheckUpdates');
-  if (btn && !silent) {
-    btn.disabled = true;
-    btn.textContent = 'Comprobando…';
-  }
-  const res = await window.api.checkUpdates();
-  if (btn && !silent) {
-    btn.disabled = false;
-    btn.textContent = 'Buscar actualizaciones';
-  }
-
-  if (box) {
-    box.style.display = 'block';
-    if (!res.ok) {
-      box.className = 'result-box warn';
-      box.textContent = res.error || 'No se pudo comprobar';
-    } else if (res.updateAvailable) {
-      box.className = 'result-box ok';
-      box.innerHTML = `${escHtml(res.message)} <button type="button" class="btn-text" id="btnDownloadUpdate">Abrir descarga</button>`;
-      const dl = $('btnDownloadUpdate');
-      if (dl) {
-        dl.addEventListener('click', () => window.api.openExternal(res.htmlUrl || res.releasesUrl));
-      }
-    } else {
-      box.className = 'result-box ok';
-      box.textContent = res.message || `Al día (v${res.current})`;
-    }
-  }
-
-  if (!silent) {
-    if (!res.ok) showToast(res.error || 'Error al buscar updates', 'error');
-    else if (res.updateAvailable) showToast(res.message, 'success');
-    else showToast(res.message || 'Al día', 'info');
-  } else if (res.ok && res.updateAvailable) {
-    showToast(res.message, 'success');
-  }
-  return res;
-}
-
-$('btnCheckUpdates')?.addEventListener('click', () => checkForUpdates({ silent: false }));
-$('btnOpenReleases')?.addEventListener('click', async () => {
-  const info = appInfoCache || await loadAppInfo();
-  const url = info?.homepage
-    ? `${info.homepage.replace(/\/$/, '')}/releases`
-    : (info?.repository ? `https://github.com/${info.repository.owner}/${info.repository.repo}/releases` : '');
-  if (url) window.api.openExternal(url);
-  else showToast('No se pudo determinar la URL de releases. Revisa package.json.', 'error');
-});
-
-// ── iPhone / AirPlay + OBS Virtual Camera ─────────────────────
-const iphoneState = {
-  uxplayRunning: false,
-  obsVcamRunning: false,
-  mode: 'screen', // 'screen' | 'camera'
-};
-
-// Quality presets mapped to UxPlay args
-const QUALITY_PRESETS = {
-  max:    { fps: 60, res: '1920x1080@60', label: '1080p / 60 fps' },
-  high:   { fps: 30, res: '1920x1080@30', label: '1080p / 30 fps' },
-  medium: { fps: 30, res: '1280x720@30',  label: '720p / 30 fps'  },
-};
-
-function initIphoneModeSelector() {
-  const modeBtns = $$('.iphone-mode-btn');
-  modeBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (iphoneState.uxplayRunning) return; // can't switch while running
-      modeBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      iphoneState.mode = btn.dataset.mode;
-      updateIphoneModeUI();
+    [...codecRadios, ...facingRadios, ...rotRadios].forEach((r) => {
+      r.addEventListener('change', commitSettingsFromUI);
     });
-  });
-}
 
-function updateIphoneModeUI() {
-  const isCamera    = iphoneState.mode === 'camera';
-  const label       = $('btnStartIphoneLabel');
-  const title       = $('iphoneCardTitle');
-  const subtitle    = $('iphoneCardSubtitle');
-  const stepsScreen = $('stepsScreen');
-  const stepsCamera = $('stepsCamera');
-  const stepsTitle  = $('iphoneStepsTitle');
-
-  if (label)    label.textContent    = isCamera ? 'Iniciar Cámara' : 'Iniciar como Webcam';
-  if (title)    title.textContent    = isCamera ? 'Cámara AirPlay' : 'Receptor AirPlay';
-  if (subtitle) subtitle.textContent = isCamera
-    ? 'Transmite solo la cámara del iPhone a este PC vía Wi-Fi'
-    : 'El iPhone transmite su pantalla a este PC vía Wi-Fi';
-  if (stepsTitle)  stepsTitle.textContent = isCamera
-    ? '📸 Cómo usar la Cámara del iPhone'
-    : '📱 Cómo conectar tu iPhone';
-  if (stepsScreen) stepsScreen.style.display = isCamera ? 'none' : 'block';
-  if (stepsCamera) stepsCamera.style.display = isCamera ? 'block' : 'none';
-}
-
-async function initIphoneSection() {
-  if (!window.api?.iphoneToolsStatus) return;
-  const status = await window.api.iphoneToolsStatus();
-
-  const uxAlert  = $('uxplayMissingAlert');
-  const obsAlert = $('obsMissingAlert');
-  const startBtn = $('btnStartIphone');
-  const useObsCb = $('iphoneUseObs');
-
-  if (!status.uxplay && uxAlert) { uxAlert.style.display = 'flex'; }
-  if (!status.obs   && obsAlert) { obsAlert.style.display = 'flex'; }
-
-  if (!status.uxplay && startBtn) {
-    startBtn.disabled  = true;
-    startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>UxPlay requerido</span>';
-  }
-  if (!status.obs && useObsCb) {
-    useObsCb.checked  = false;
-    useObsCb.disabled = true;
-  } else if (useObsCb) {
-    const savedUseObs = localStorage.getItem('scrcpy-iphone-use-obs');
-    if (savedUseObs !== null) {
-      useObsCb.checked = savedUseObs === 'true';
-    }
-    useObsCb.addEventListener('change', () => {
-      localStorage.setItem('scrcpy-iphone-use-obs', String(useObsCb.checked));
+    [chkTorch, chkNoAudio, chkStayAwake, chkScreenOff].forEach((c) => {
+      if (c) c.addEventListener('change', commitSettingsFromUI);
     });
-  }
 
-  initIphoneModeSelector();
-  iphoneState.uxplayRunning = !!status.running;
-  updateIphoneModeUI();
-  updateIphoneUI();
-}
+    // Presets rápidos
+    presetRadios.forEach((p) => {
+      p.addEventListener('change', () => {
+        const fps = parseInt(p.dataset.fps, 10);
+        const br = parseInt(p.dataset.br, 10);
+        const res = parseInt(p.dataset.res, 10);
 
+        if (sliderFps) { sliderFps.value = fps; paintSlider(sliderFps); }
+        if (sliderBr) { sliderBr.value = br; paintSlider(sliderBr); }
+        if (selRes) { selRes.value = res; }
 
-function updateIphoneUI() {
-  const { uxplayRunning } = iphoneState;
-  const badge    = $('iphoneBadge');
-  const navBadge = $('iphoneNavBadge');
-  const startBtn = $('btnStartIphone');
-  const stopBtn  = $('btnStopIphone');
-  const useObs   = $('iphoneUseObs')?.checked;
+        commitSettingsFromUI();
+        showToast(`Perfil aplicado: ${p.parentElement.querySelector('b')?.textContent || ''}`, 'info');
+      });
+    });
 
-  if (uxplayRunning) {
-    if (badge) {
-      badge.className   = 'status-pill ok';
-      badge.textContent = useObs ? '🎥 Webcam activa' : '📡 AirPlay activo';
+    // About buttons
+    if (btnCheckUpdates) {
+      btnCheckUpdates.addEventListener('click', async () => {
+        btnCheckUpdates.disabled = true;
+        showToast('Buscando actualizaciones…', 'info');
+        const res = await window.api.checkUpdates();
+        btnCheckUpdates.disabled = false;
+        if (res.ok) {
+          showToast(res.message || (res.updateAvailable ? `Nueva versión: v${res.latest}` : 'Estás al día'), 'info');
+          if (res.updateAvailable && res.htmlUrl) {
+            window.api.openExternal(res.htmlUrl);
+          }
+        } else {
+          showToast(res.error || 'No se pudo comprobar', 'warn');
+        }
+      });
     }
-    if (navBadge) navBadge.style.display = 'inline';
-    if (startBtn) startBtn.style.display = 'none';
-    if (stopBtn)  stopBtn.style.display  = 'inline-flex';
-  } else {
-    if (badge) {
-      badge.className   = 'status-pill';
-      badge.textContent = 'Inactivo';
+
+    if (btnOpenGithub) {
+      btnOpenGithub.addEventListener('click', () => {
+        window.api.openExternal('https://github.com/danieth-dev/scrcpy-gui/releases');
+      });
     }
-    if (navBadge) navBadge.style.display = 'none';
-    if (startBtn) startBtn.style.display = 'inline-flex';
-    if (stopBtn)  stopBtn.style.display  = 'none';
+
+    if (btnResetSettings) {
+      btnResetSettings.addEventListener('click', () => {
+        state.settings = defaultSettings();
+        saveSettings();
+        applySettingsToUI();
+        showToast('Ajustes restablecidos', 'info');
+      });
+    }
+
+    if (btnInstallVcam) {
+      btnInstallVcam.addEventListener('click', async () => {
+        await window.api.vcamInstallDriver();
+        showToast('Solicitando permisos de Administrador para registrar el driver DirectShow…', 'info');
+        setTimeout(updateVcamStatus, 4000);
+      });
+    }
+
+    applySettingsToUI();
+
   }
-}
 
-function setIphoneStatus(msg, type = 'info') {
-  const box = $('iphoneStatusMsg');
-  if (!box) return;
-  box.style.display = 'block';
-  box.className = `result-box${type === 'error' ? ' err' : type === 'success' ? ' ok' : ''}`;
-  box.textContent = msg;
-}
+  function applySettingsToUI() {
+    const s = state.settings;
+    if (selRes) selRes.value = s.maxSize ?? 1080;
+    if (sliderFps) { sliderFps.value = s.maxFps || 30; paintSlider(sliderFps); }
+    if (sliderBr) { sliderBr.value = s.bitrate || 8; paintSlider(sliderBr); }
+    if (sliderZoom) { sliderZoom.value = s.cameraZoom || 1; paintSlider(sliderZoom); }
 
-$('btnStartIphone')?.addEventListener('click', async () => {
-  const name     = $('iphoneName')?.value?.trim() || 'scrcpy GUI';
-  const useObs   = $('iphoneUseObs')?.checked ?? true;
-  const quality  = $('iphoneQuality')?.value || 'max';
-  const startBtn = $('btnStartIphone');
-  const qPreset  = QUALITY_PRESETS[quality] || QUALITY_PRESETS.max;
+    codecRadios.forEach((r) => { r.checked = r.value === (s.codec || 'h264'); });
+    facingRadios.forEach((r) => { r.checked = r.value === (s.cameraFacing || 'front'); });
+    rotRadios.forEach((r) => { r.checked = r.value === String(s.orientation ?? '0'); });
 
-  startBtn.disabled = true;
-  startBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Iniciando…</span>';
-
-  // 1) Start UxPlay con modo y calidad
-  const uxRes = await window.api.iphoneStartUxPlay({
-    name,
-    fps: qPreset.fps,
-    res: qPreset.res,
-    cameraMode: iphoneState.mode === 'camera',
-  });
-  if (!uxRes.ok) {
-    setIphoneStatus('❌ Error UxPlay: ' + uxRes.error, 'error');
-    startBtn.disabled = false;
-    const errLbl = $('btnStartIphoneLabel');
-    if (errLbl) errLbl.textContent = iphoneState.mode === 'camera' ? 'Iniciar Cámara' : 'Iniciar como Webcam';
-    return;
+    if (chkTorch) chkTorch.checked = !!s.cameraTorch;
+    if (chkNoAudio) chkNoAudio.checked = !!s.noAudio;
+    if (chkStayAwake) chkStayAwake.checked = !!s.stayAwake;
+    if (chkScreenOff) chkScreenOff.checked = !!s.screenOff;
   }
-  iphoneState.uxplayRunning = true;
-  updateIphoneUI();
 
-  // 2) OBS Virtual Camera
-  if (useObs) {
-    setIphoneStatus('✅ UxPlay listo. Conectando con OBS Virtual Camera…', 'info');
+  function commitSettingsFromUI() {
+    const getRadioVal = (radios, def) => {
+      const checked = [...radios].find((r) => r.checked);
+      return checked ? checked.value : def;
+    };
 
-    // Give UxPlay a moment to open its window before OBS tries to capture it
-    await new Promise(r => setTimeout(r, 1500));
+    state.settings = {
+      maxSize: selRes ? parseInt(selRes.value, 10) : 1080,
+      maxFps: sliderFps ? parseInt(sliderFps.value, 10) : 30,
+      bitrate: sliderBr ? parseInt(sliderBr.value, 10) : 8,
+      cameraZoom: sliderZoom ? parseFloat(sliderZoom.value) : 1,
+      codec: getRadioVal(codecRadios, 'h264'),
+      cameraFacing: getRadioVal(facingRadios, 'front'),
+      orientation: getRadioVal(rotRadios, '0'),
+      cameraTorch: chkTorch ? chkTorch.checked : false,
+      noAudio: chkNoAudio ? chkNoAudio.checked : true,
+      stayAwake: chkStayAwake ? chkStayAwake.checked : true,
+      screenOff: chkScreenOff ? chkScreenOff.checked : true,
+    };
 
-    const obsRes = await window.api.iphoneObsVirtualCam({ start: true });
-    if (obsRes.ok) {
-      iphoneState.obsVcamRunning = true;
-      const fallback = obsRes.fallback
-        ? ' OBS abrirá en unos segundos. Luego añade Window Capture apuntando a la ventana UxPlay.'
+    saveSettings();
+    scheduleProfilePreview();
+  }
+
+  // ── 15.5 Vista previa del perfil real por dispositivo ─────────────
+  // Los ajustes son deseos; el backend los traduce a lo que el teléfono
+  // soporta de verdad (cámaras, tamaños, fps, codificadores hardware).
+  const CODEC_LABEL = { h264: 'H.264', h265: 'H.265', av1: 'AV1' };
+  const FACING_LABEL = { front: 'frontal', back: 'trasera', external: 'externa' };
+  let previewTimer = null;
+  let previewSeq = 0;
+
+  function previewDevice() {
+    const online = (state.devices || []).filter((d) => !d.state || d.state === 'device');
+    return state.selectedDevice && online.find((d) => d.serial === state.selectedDevice.serial)
+      || online[0] || null;
+  }
+
+  function scheduleProfilePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(updateProfilePreview, 250);
+  }
+
+  function describeProfile(p) {
+    const w = (p.orientation === 90 || p.orientation === 270) ? p.height : p.width;
+    const h = (p.orientation === 90 || p.orientation === 270) ? p.width : p.height;
+    const parts = [
+      `${w}×${h}`,
+      `${p.fps} fps${p.highSpeed ? ' (alta velocidad)' : ''}`,
+      `${CODEC_LABEL[p.codec] || p.codec}${p.encoder ? ' por hardware' : ''}`,
+      `${p.bitrateMbps} Mbps`,
+      `cámara ${FACING_LABEL[p.facing] || p.facing}`,
+    ];
+    if (p.zoom > 1) parts.push(`zoom ${Number(p.zoom).toFixed(1)}×`);
+    if (p.torch) parts.push('linterna');
+    return parts.join(' · ');
+  }
+
+  async function updateProfilePreview() {
+    const box = $('profilePreview');
+    if (!box || !window.api.deviceProfile) return;
+    const dev = previewDevice();
+    if (!dev) { box.hidden = true; return; }
+
+    const seq = ++previewSeq;
+    let res;
+    try {
+      res = await window.api.deviceProfile(dev.serial, getLaunchOptions('camera'), 'window');
+    } catch (e) {
+      console.error('[profile]', e);
+      return;
+    }
+    if (seq !== previewSeq || !res || !res.ok) return;
+
+    const p = res.profile;
+    box.hidden = false;
+    $('ppDevice').textContent = dev.model || dev.serial;
+    $('ppSummary').textContent = describeProfile(p);
+    const notes = $('ppNotes');
+    notes.innerHTML = '';
+    (p.verified ? p.notes : [res.capsError || 'No se pudieron leer las capacidades', ...p.notes])
+      .forEach((n) => {
+        const li = document.createElement('li');
+        li.textContent = n;
+        notes.appendChild(li);
+      });
+
+    // Formatos sin codificador por hardware en este teléfono
+    const hw = res.hwCodecs || [];
+    codecRadios.forEach((r) => {
+      const lbl = r.closest('label');
+      const missing = hw.length > 0 && !hw.includes(r.value);
+      lbl.classList.toggle('unavailable', missing);
+      lbl.title = missing
+        ? `${dev.model || 'Este teléfono'} no tiene codificador por hardware para ${CODEC_LABEL[r.value]}: se usará otro formato`
         : '';
-      setIphoneStatus(
-        `🎥 Webcam activa${fallback}\n` +
-        `→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"\n` +
-        `→ En Zoom/Teams: selecciona "OBS Virtual Camera"`,
-        'success'
-      );
-      showToast(`📱 iPhone Webcam lista · Busca "${name}" en tu iPhone`, 'success');
-    } else {
-      setIphoneStatus(
-        `📡 AirPlay listo, pero OBS Virtual Camera falló: ${obsRes.error}\n` +
-        `→ Abre OBS manualmente → Controls → "Start Virtual Camera"\n` +
-        `→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"`,
-        'info'
-      );
-      showToast(`AirPlay listo · Arranca OBS Virtual Camera manualmente`, 'info');
-    }
-  } else {
-    setIphoneStatus(
-      `📡 Receptor AirPlay listo.\n→ En tu iPhone: Centro de Control → Duplicar pantalla → "${name}"`,
-      'success'
-    );
-    showToast(`AirPlay listo · Busca "${name}" en tu iPhone`, 'success');
-  }
-
-  startBtn.disabled = false;
-  // Update the name hint in instructions
-  const hint    = $('iphoneNameHint');
-  const hintCam = $('iphoneNameHintCam');
-  if (hint)    hint.textContent    = `"${name}"`;
-  if (hintCam) hintCam.textContent = `"${name}"`;
-  // Restore button label
-  const lbl = $('btnStartIphoneLabel');
-  if (lbl) lbl.textContent = iphoneState.mode === 'camera' ? 'Iniciar C\u00e1mara' : 'Iniciar como Webcam';
-  updateIphoneUI();
-});
-
-$('btnStopIphone')?.addEventListener('click', async () => {
-  if (iphoneState.obsVcamRunning) {
-    await window.api.iphoneObsVirtualCam({ start: false });
-    iphoneState.obsVcamRunning = false;
-  }
-  await window.api.iphoneStopUxPlay();
-  iphoneState.uxplayRunning = false;
-  const box = $('iphoneStatusMsg');
-  if (box) box.style.display = 'none';
-  updateIphoneUI();
-  showToast('iPhone webcam detenida', 'info');
-});
-
-// Live-update instructions name hint as user types
-$('iphoneName')?.addEventListener('input', () => {
-  const v = $('iphoneName').value.trim() || 'scrcpy GUI';
-  const hint = $('iphoneNameHint');
-  if (hint) hint.textContent = `"${v}"`;
-});
-
-// External link buttons
-$('btnGetUxPlay')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://github.com/leapbtw/uxplay-windows/releases');
-});
-$('btnGetObs')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://obsproject.com/download');
-});
-
-// Handle unexpected UxPlay exit
-window.api?.onIphoneUxPlayStopped?.(() => {
-  iphoneState.uxplayRunning   = false;
-  iphoneState.obsVcamRunning  = false;
-  const box = $('iphoneStatusMsg');
-  if (box) box.style.display = 'none';
-  updateIphoneUI();
-  showToast('Receptor AirPlay detenido', 'info');
-});
-
-// ── iPhone USB Direct Camera (usbmuxd) ──────────────────────────
-const iphoneUsbState = {
-  devices: [],
-  streaming: false,
-};
-
-function initIphoneConnSelector() {
-  const connBtns = $$('#iphoneConnSelector .iphone-mode-btn');
-  const usbSection = $('iphoneUsbSection');
-  const airplaySection = $('iphoneAirplaySection');
-
-  connBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      connBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const conn = btn.dataset.conn;
-      if (usbSection) usbSection.style.display = (conn === 'usb') ? 'block' : 'none';
-      if (airplaySection) airplaySection.style.display = (conn === 'airplay') ? 'block' : 'none';
     });
-  });
-}
 
-function updateIphoneUsbUI() {
-  const badge = $('iphoneUsbBadge');
-  const devName = $('iphoneUsbDeviceName');
-  const devSerial = $('iphoneUsbDeviceSerial');
-  const startBtn = $('btnStartIphoneUsb');
-  const stopBtn = $('btnStopIphoneUsb');
-  const statsBox = $('iphoneUsbLiveStats');
-
-  const hasDevice = iphoneUsbState.devices.length > 0;
-  const isStreaming = iphoneUsbState.streaming;
-
-  if (isStreaming) {
-    if (badge) { badge.className = 'status-pill ok'; badge.textContent = '⚡ Transmitiendo por USB'; }
-    if (startBtn) startBtn.style.display = 'none';
-    if (stopBtn) stopBtn.style.display = 'inline-flex';
-    if (statsBox) statsBox.style.display = 'flex';
-  } else if (hasDevice) {
-    if (badge) { badge.className = 'status-pill ok'; badge.textContent = '🟢 iPhone Conectado'; }
-    if (devName) devName.textContent = 'iPhone detectado por cable USB';
-    if (devSerial) devSerial.textContent = `ID usbmuxd: ${iphoneUsbState.devices[0].deviceId || iphoneUsbState.devices[0].serial} · Cable listo`;
-    if (startBtn) {
-      startBtn.disabled = false;
-      startBtn.style.display = 'inline-flex';
+    // Zoom máximo real de la cámara elegida
+    const cam = (res.cameras || []).find((c) => c.facing === p.facing);
+    if (sliderZoom && cam && cam.zoomMax) {
+      const max = Math.max(1, Math.min(10, cam.zoomMax));
+      if (String(sliderZoom.max) !== String(max)) {
+        sliderZoom.max = max;
+        if (parseFloat(sliderZoom.value) > max) sliderZoom.value = max;
+        paintSlider(sliderZoom);
+      }
     }
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (statsBox) statsBox.style.display = 'none';
-  } else {
-    if (badge) { badge.className = 'status-pill'; badge.textContent = 'Esperando cable USB…'; }
-    if (devName) devName.textContent = 'Buscando iPhone conectado por cable USB…';
-    if (devSerial) devSerial.textContent = 'Conecta tu iPhone por cable USB a la PC';
-    if (startBtn) {
-      startBtn.disabled = false;
-      startBtn.style.display = 'inline-flex';
-    }
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (statsBox) statsBox.style.display = 'none';
-  }
-}
-
-async function refreshIphoneUsbStatus() {
-  if (!window.api?.iphoneUsbStatus) return;
-  try {
-    const res = await window.api.iphoneUsbStatus();
-    iphoneUsbState.devices = res.devices || [];
-    iphoneUsbState.streaming = !!res.streaming;
-    updateIphoneUsbUI();
-  } catch (_) {}
-}
-
-$('btnStartIphoneUsb')?.addEventListener('click', async () => {
-  const startBtn = $('btnStartIphoneUsb');
-  const statusBox = $('iphoneUsbStatusMsg');
-  const useObs = $('iphoneUsbUseObs')?.checked;
-
-  if (startBtn) startBtn.disabled = true;
-  if (statusBox) statusBox.style.display = 'none';
-
-  const res = await window.api.iphoneUsbStartStream({ port: 50005 });
-  if (!res.ok) {
-    if (statusBox) {
-      statusBox.style.display = 'block';
-      statusBox.className = 'result-box err';
-      statusBox.textContent = `❌ ${res.error}`;
-    }
-    if (startBtn) startBtn.disabled = false;
-    showToast(res.error, 'error');
-    return;
   }
 
-  iphoneUsbState.streaming = true;
-  updateIphoneUsbUI();
-  showToast('Cámara iPhone conectada por cable USB', 'success');
-
-  if (statusBox) {
-    statusBox.style.display = 'block';
-    statusBox.className = 'result-box ok';
-    statusBox.textContent = '⚡ Transmitiendo en tiempo real por cable USB (usbmuxd). Latencia < 8 ms.';
-  }
-
-  if (useObs) {
-    await window.api.iphoneObsVirtualCam({ start: true });
-  }
-});
-
-$('btnStopIphoneUsb')?.addEventListener('click', async () => {
-  await window.api.iphoneUsbStopStream();
-  iphoneUsbState.streaming = false;
-  updateIphoneUsbUI();
-  const statusBox = $('iphoneUsbStatusMsg');
-  if (statusBox) statusBox.style.display = 'none';
-  showToast('Transmisión USB detenida', 'info');
-});
-
-window.api?.onIphoneUsbDeviceChange?.((data) => {
-  if (data.device) {
-    if (data.connected) {
-      iphoneUsbState.devices = [data.device];
-      showToast('📱 iPhone conectado por cable USB', 'info');
+  function showProfileNotes(profile, what) {
+    if (!profile) return;
+    const summary = describeProfile(profile);
+    if (profile.notes && profile.notes.length) {
+      showToast(`${what}: ${summary}. ${profile.notes.join('. ')}`, 'warn');
     } else {
-      iphoneUsbState.devices = [];
-      iphoneUsbState.streaming = false;
-      showToast('iPhone desconectado del cable USB', 'warn');
+      showToast(`${what}: ${summary}`, 'success');
     }
   }
-  updateIphoneUsbUI();
-});
 
-window.api?.onIphoneUsbStats?.((stats) => {
-  const bitrateEl = $('iphoneUsbBitrate');
-  if (bitrateEl) bitrateEl.textContent = `${stats.kbps} kbps`;
-});
+  // ── 15.6 Salud del teléfono (temperatura / batería) ──────────────
+  // El backend la vigila durante las sesiones y baja la calidad si se calienta.
+  const THROTTLE_LABEL = ['', 'calidad reducida', 'calidad mínima', 'detenido'];
+  state.health = {};
 
-// Init iPhone section
-if (window.api?.iphoneToolsStatus) {
-  initIphoneSection();
-}
-if (window.api?.iphoneUsbStatus) {
-  initIphoneConnSelector();
-  refreshIphoneUsbStatus();
-  setInterval(refreshIphoneUsbStatus, 2500);
-}
+  function renderHealthChip(serial) {
+    const h = (state.health || {})[serial];
+    if (!h || h.active === false || h.batteryTemp == null) return '';
+    const lvl = h.level || 0;
+    const cls = lvl >= 2 ? 'hot' : lvl === 1 ? 'warm' : '';
+    const status = ['normal', 'leve', 'moderado', 'grave', 'crítico', 'emergencia', 'apagado'][h.thermalStatus ?? 0] || '';
+    const title = `Temperatura de la batería · estado térmico ${status}` +
+      (lvl ? ` · Protección activa: ${THROTTLE_LABEL[lvl]}` : '');
+    return `<span class="chip temp ${cls}" title="${escHtml(title)}">${Number(h.batteryTemp).toFixed(1)} °C${lvl ? ` · ${THROTTLE_LABEL[lvl]}` : ''}</span>`;
+  }
 
-// ── Init ───────────────────────────────────────────────────────
-(async function init() {
-  applySettingsToUI();
-  renderRecents();
-  try {
-    const lastWifi = localStorage.getItem('scrcpy-last-wifi-endpoint');
-    if (lastWifi && wifiEndpoint && !wifiEndpoint.value) {
-      wifiEndpoint.value = lastWifi;
+  function profileRes(p) {
+    if (!p) return null;
+    const rot = p.orientation === 90 || p.orientation === 270;
+    return rot ? `${p.height}x${p.width}` : `${p.width}x${p.height}`;
+  }
+
+  // Reconexión automática tras un corte (cable, cargador, Wi-Fi).
+  state.reconnecting = {};
+
+  function setupReconnectEvents() {
+    if (window.api.onReconnecting) {
+      window.api.onReconnecting((r) => {
+        if (!r || !r.serial) return;
+        state.reconnecting[r.serial] = r;
+        const what = r.kind === 'vcam' ? 'Cámara Virtual' : 'Sesión';
+        showToast(`${what}: se perdió la conexión con el teléfono. Reconectando (${r.attempt}/${r.of})…`, 'warn');
+        renderDeviceCards();
+      });
     }
-  } catch (_) {}
-  await loadAppInfo();
-  await checkTools();
-  await refreshDevices();
-  updateSessionsUI();
-
-  // Auto-check at most once per day (no molesta si no hay repo configurado)
-  try {
-    const key = 'scrcpy-last-update-check';
-    const last = parseInt(localStorage.getItem(key) || '0', 10);
-    if (Date.now() - last > 24 * 60 * 60 * 1000) {
-      localStorage.setItem(key, String(Date.now()));
-      await checkForUpdates({ silent: true });
+    if (window.api.onReconnected) {
+      window.api.onReconnected((r) => {
+        if (!r || !r.serial) return;
+        delete state.reconnecting[r.serial];
+        if (r.kind === 'vcam') {
+          if (r.profile) {
+            state.vcam.profile = r.profile;
+            state.vcam.resolution = profileRes(r.profile);
+          }
+        } else if (state.sessions[r.serial]) {
+          const s = state.sessions[r.serial];
+          if (r.pid) s.pid = r.pid;
+          if (r.profile) {
+            s.resolution = profileRes(r.profile).replace('x', '×');
+            s.fps = r.profile.fps;
+          }
+        }
+        showToast(r.kind === 'vcam' ? 'Cámara Virtual reconectada' : 'Sesión reconectada', 'success');
+        renderDeviceCards();
+        renderSessionsUI();
+      });
     }
-  } catch (_) {}
+  }
+
+  function setupHealthEvents() {
+    setupReconnectEvents();
+    if (window.api.onDeviceHealth) {
+      window.api.onDeviceHealth((h) => {
+        if (!h || !h.serial) return;
+        state.health[h.serial] = { ...(state.health[h.serial] || {}), ...h };
+        renderDeviceCards();
+      });
+    }
+    if (window.api.onDeviceAlert) {
+      window.api.onDeviceAlert((a) => a && a.message && showToast(a.message, 'warn'));
+    }
+    if (window.api.onDeviceThrottle) {
+      window.api.onDeviceThrottle((t) => {
+        if (!t || !t.serial) return;
+        state.health[t.serial] = { ...(state.health[t.serial] || {}), level: t.level };
+        const why = t.reason ? ` (${t.reason})` : '';
+        if (t.action === 'stopped') {
+          delete state.sessions[t.serial];
+          if (state.vcam.serial === t.serial) {
+            state.vcam.running = false;
+            state.vcam.serial = null;
+          }
+          renderSessionsUI();
+          showToast(`Cámara detenida para proteger el teléfono${why}. Déjalo enfriar unos minutos.`, 'error');
+        } else if (t.action === 'restarted') {
+          const s = state.sessions[t.serial];
+          if (s && t.windowProfile) {
+            s.resolution = profileRes(t.windowProfile).replace('x', '×');
+            s.fps = t.windowProfile.fps;
+          }
+          if (t.vcamProfile && state.vcam.serial === t.serial) {
+            state.vcam.profile = t.vcamProfile;
+            state.vcam.resolution = profileRes(t.vcamProfile);
+          }
+          showToast(t.level > 0
+            ? `Protección térmica: ${THROTTLE_LABEL[t.level]}${why}`
+            : 'El teléfono se enfrió: calidad completa restaurada', t.level > 0 ? 'warn' : 'success');
+        } else if (t.level > 0) {
+          showToast(`El teléfono se está calentando${why}. Considera bajar la calidad.`, 'warn');
+        }
+        renderDeviceCards();
+      });
+    }
+  }
+
+  // ── 16. Actualización Periódica de Dispositivos ────────────────────
+  let lastPreviewSerial = null;
+  async function refreshDevices() {
+    try {
+      const res = await window.api.getDevices();
+      if (res.ok) {
+        state.devices = res.devices || [];
+        renderDeviceCards();
+        const dev = previewDevice();
+        const serial = dev ? dev.serial : null;
+        if (serial !== lastPreviewSerial) {
+          lastPreviewSerial = serial;
+          scheduleProfilePreview();
+        }
+      }
+    } catch (e) {
+      console.error('[refreshDevices error]', e);
+    }
+  }
+
+  // ── 17. Eventos de scrcpy del Backend ──────────────────────────────
+  function setupTauriEvents() {
+    window.api.onScrcpyStopped((data) => {
+      const serial = data.serial;
+      if (state.reconnecting) delete state.reconnecting[serial];
+      if (state.sessions[serial]) {
+        delete state.sessions[serial];
+        renderDeviceCards();
+        renderSessionsUI();
+        if (data.error) {
+          showToast(`scrcpy finalizó con aviso: ${data.error}`, 'warn');
+          showAlert('scrcpy se detuvo con aviso', data.error, data.error);
+        } else {
+          showToast(`Sesión de ${serial} cerrada`, 'info');
+        }
+      }
+    });
+
+    window.api.onScrcpyTexture((data) => {
+      const session = state.sessions[data.serial];
+      if (session) {
+        session.resolution = data.resolution || `${data.width}×${data.height}`;
+        renderDeviceCards();
+        renderSessionsUI();
+      }
+    });
+
+    window.api.onIphoneUxPlayStopped(() => {
+      state.iphoneRunning = false;
+      if (btnStartIphoneLabel) btnStartIphoneLabel.textContent = 'Iniciar';
+      if (iphoneStateBadge) {
+        iphoneStateBadge.dataset.state = '';
+        iphoneStateText.textContent = 'Detenido';
+      }
+      showToast('UxPlay se cerró', 'info');
+    });
+
+    setupHealthEvents();
+
+    if (window.api.onVcamStats) {
+      window.api.onVcamStats((stats) => {
+        state.vcam.fps = stats.fps;
+        state.vcam.decodedFps = stats.decodedFps;
+        state.vcam.dropped = stats.dropped;
+        renderDeviceCards();
+      });
+    }
+
+    if (window.api.onVcamStopped) {
+      window.api.onVcamStopped((info) => {
+        const wasRunning = state.vcam.running;
+        if (state.reconnecting && info && info.serial) delete state.reconnecting[info.serial];
+        state.vcam.running = false;
+        state.vcam.serial = null;
+        renderDeviceCards();
+        if (info && info.error) {
+          console.error('[vcam]', info.error);
+          showToast('Cámara Virtual detenida: ' + info.error, 'error');
+        } else if (wasRunning) {
+          showToast('Cámara Virtual DirectShow detenida', 'info');
+        }
+      });
+    }
+  }
+
+  // ── 18. Inicialización General ─────────────────────────────────────
+  async function init() {
+    setupNavigation();
+    setupTitlebar();
+    setupWifi();
+    setupIphone();
+    setupSettings();
+    setupModal();
+    setupTauriEvents();
+
+    if (btnRescan) btnRescan.addEventListener('click', refreshDevices);
+    if (btnRefreshEmpty) btnRefreshEmpty.addEventListener('click', refreshDevices);
+    if (btnStopAll) btnStopAll.addEventListener('click', stopAllSessions);
+
+    renderRecents();
+    await updateVcamStatus();
+    await refreshDevices();
+
+
+    // Timer de actualización de dispositivos cada 4s
+    state.pollTimer = setInterval(refreshDevices, 4000);
+
+    // Timer de reloj para duraciones en vivo cada 1s
+    state.clockTimer = setInterval(() => {
+      if (Object.keys(state.sessions).length > 0) {
+        $$('.session-timer').forEach((el) => {
+          const card = el.closest('.device');
+          const serial = card?.dataset?.serial;
+          if (serial && state.sessions[serial]) {
+            el.textContent = formatDuration(state.sessions[serial].startedAt);
+          }
+        });
+      }
+    }, 1000);
+  }
+
+  // Arrancar al cargar el DOM
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

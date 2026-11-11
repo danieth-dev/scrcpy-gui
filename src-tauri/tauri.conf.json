@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "scrcpy GUI",
+  "version": "1.3.1",
+  "identifier": "com.scrcpy.gui",
+  "build": {
+    "frontendDist": "../dist-ui",
+    "beforeDevCommand": "node scripts/sync-ui.js",
+    "beforeBuildCommand": "node scripts/sync-ui.js"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "scrcpy GUI",
+        "width": 960,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 580,
+        "decorations": false,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "../vendor/": "vendor/"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

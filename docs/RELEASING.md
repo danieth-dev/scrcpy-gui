@@ -42,21 +42,37 @@ git push -u origin main
 4. Tag: `git tag v1.1.0`  
 5. `git push && git push --tags`
 
-## 4. Build del .exe
+## 4. Build del ejecutable (.exe en Rust)
 
 ```bash
+cd gui
 npm run vendor:sync -- "C:\ruta\scrcpy-win64-vX.Y"
 npm run build
 ```
 
-El portable queda en `dist/`.
+Se generan:
+
+- **Instalador (recomendado para usuarios):**
+  `src-tauri/target/release/bundle/nsis/scrcpy GUI_X.Y.Z_x64-setup.exe`
+  Instala para todos los usuarios (pide permisos de administrador una vez),
+  copia `vendor/` (scrcpy, adb, driver) junto al programa y **registra la
+  cámara virtual "Unity Video Capture" automáticamente**. Al desinstalar, la
+  quita.
+- **Ejecutable suelto (desarrollo):** `src-tauri/target/release/scrcpy-gui.exe`
+  (~15 MB; necesita la carpeta `vendor/` cerca).
+
+No hace falta `ffmpeg.exe`: la cámara virtual decodifica en proceso con las
+DLL de FFmpeg que ya trae el release de scrcpy (`avcodec-*.dll`, `avutil-*.dll`).
+
+> Tamaño: `vendor/uxplay` (≈256 MB) es la mayor parte del instalador. Si no
+> se distribuye la función de iPhone/AirPlay, quitarlo reduce mucho la descarga.
 
 ## 5. GitHub Release
 
 1. GitHub → tu repo → **Releases** → **Draft a new release**  
-2. Tag: `v1.1.0` (igual que en package.json)  
+2. Tag: `vX.Y.Z` (igual que en package.json)  
 3. Título / notas (pega desde CHANGELOG)  
-4. Adjunta el `.exe` de `dist/`  
+4. Adjunta el instalador `src-tauri/target/release/bundle/nsis/scrcpy GUI_X.Y.Z_x64-setup.exe`  
 5. **Publish release**
 
 A partir de ahí, la app detecta la nueva versión al abrir (1 vez al día) o con el botón **Buscar actualizaciones**.
