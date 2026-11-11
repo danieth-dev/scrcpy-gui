@@ -80,8 +80,14 @@
 
   // Ajustes
   const presetRadios = $$('input[name="preset"]');
-  const selRes = $('res');
-  const sliderFps = $('fps');
+  const selCamRes = $('camRes');
+  const selScrRes = $('screenRes');
+  const camFpsBox = $('camFps');
+  const scrFpsBox = $('screenFps');
+  const panelImage = $('panelImage');
+  const autoBadge = $('autoBadge');
+  const capsHint = $('capsHint');
+  const specMax = $('specMax');
   const sliderBr = $('br');
   const sliderZoom = $('zoom');
   const codecRadios = $$('input[name="codec"]');
@@ -91,6 +97,7 @@
   const chkNoAudio = $('noAudio');
   const chkStayAwake = $('stayAwake');
   const chkScreenOff = $('screenOff');
+  const chkProtection = $('deviceProtection');
   const btnCheckUpdates = $('btnCheckUpdates');
   const btnOpenGithub = $('btnOpenGithub');
   const btnResetSettings = $('btnResetSettings');
@@ -112,9 +119,13 @@
   // ── 3. Persistencia de Ajustes y Recientes ─────────────────────────
   function defaultSettings() {
     return {
-      maxSize: 1080,
-      maxFps: 30,
-      bitrate: 8,
+      quality: 'max',      // 'max' = lo mejor que dé el teléfono; 'custom' = elegido
+      preset: 'max',
+      maxSize: 0,          // cámara: altura (0 = máxima del teléfono)
+      maxFps: 30,          // cámara
+      screenRes: 0,        // pantalla: lado corto (0 = nativa)
+      screenFps: 60,       // pantalla
+      bitrate: 20,
       codec: 'h264',
       noAudio: true,
       stayAwake: true,
@@ -123,13 +134,24 @@
       orientation: '0',
       cameraZoom: 1,
       cameraTorch: false,
+      deviceProtection: true,
     };
   }
 
   function loadSettings() {
     try {
       const raw = localStorage.getItem('scrcpy_gui_settings');
-      return raw ? { ...defaultSettings(), ...JSON.parse(raw) } : defaultSettings();
+      if (!raw) return defaultSettings();
+      const parsed = JSON.parse(raw);
+      const merged = { ...defaultSettings(), ...parsed };
+      if (!('quality' in parsed)) {
+        // Ajustes de antes de separar Cámara/Pantalla: se respetan tal cual.
+        merged.quality = 'custom';
+        merged.preset = null;
+        merged.screenRes = 1080;
+        merged.screenFps = parsed.maxFps || 60;
+      }
+      return merged;
     } catch (_) {
       return defaultSettings();
     }
@@ -523,6 +545,9 @@
       bitrate: s.bitrate || 8,
       codec: s.codec || 'h264',
       orientation: s.orientation || '0',
+      screenRes: s.screenRes ?? 0,
+      screenFps: s.screenFps || 60,
+      quality: s.quality || 'custom',
     };
   }
 
@@ -536,18 +561,23 @@
     const res = await window.api.launchScrcpy(serial, opts);
     if (res.ok) {
       const p = res.profile;
+      const sp = res.screenProfile;
       const rot = p && (p.orientation === 90 || p.orientation === 270);
       state.sessions[serial] = {
         serial,
         mode,
         startedAt: Date.now(),
-        resolution: p ? (rot ? `${p.height}×${p.width}` : `${p.width}×${p.height}`) : '1080×2400',
-        fps: p ? p.fps : opts.maxFps,
+        resolution: p ? (rot ? `${p.height}×${p.width}` : `${p.width}×${p.height}`)
+          : (sp && sp.width ? `${sp.width}×${sp.height}` : 'nativa'),
+        fps: p ? p.fps : (sp ? sp.fps : opts.screenFps),
         pid: res.pid,
       };
       if (dev) rememberDevice(dev);
       if (p) {
         showProfileNotes(p, 'Cámara lista');
+      } else if (sp) {
+        showToast(`Pantalla lista: ${describeScreen(sp)}${sp.notes && sp.notes.length ? '. ' + sp.notes.join('. ') : ''}`,
+          sp.notes && sp.notes.length ? 'warn' : 'success');
       } else {
         showToast(`${mode === 'camera' ? 'Cámara' : 'Pantalla'} lista`, 'success');
       }
@@ -889,38 +919,40 @@
 
   // ── 15. Ajustes y Presets ─────────────────────────────────────────
   function setupSettings() {
-    // Sliders en tiempo real con degradado
-    [sliderFps, sliderBr, sliderZoom].forEach((s) => {
-      if (!s) return;
-      paintSlider(s);
-      s.addEventListener('input', () => {
-        paintSlider(s);
-        commitSettingsFromUI();
-      });
-    });
+    // Controles que definen la calidad: tocarlos pasa a "personalizado".
+    const onQuality = () => { markCustom(); commitSettingsFromUI(); };
 
-    if (selRes) {
-      selRes.addEventListener('change', commitSettingsFromUI);
+    if (sliderBr) {
+      paintSlider(sliderBr);
+      sliderBr.addEventListener('input', () => { paintSlider(sliderBr); onQuality(); });
     }
+    if (sliderZoom) {
+      paintSlider(sliderZoom);
+      sliderZoom.addEventListener('input', () => { paintSlider(sliderZoom); commitSettingsFromUI(); });
+    }
+    [selCamRes, selScrRes].forEach((sel) => sel && sel.addEventListener('change', onQuality));
+    [camFpsBox, scrFpsBox].forEach((box) => box && box.addEventListener('change', onQuality));
+    codecRadios.forEach((r) => r.addEventListener('change', onQuality));
 
-    [...codecRadios, ...facingRadios, ...rotRadios].forEach((r) => {
+    [...facingRadios, ...rotRadios].forEach((r) => {
       r.addEventListener('change', commitSettingsFromUI);
     });
 
-    [chkTorch, chkNoAudio, chkStayAwake, chkScreenOff].forEach((c) => {
+    [chkTorch, chkNoAudio, chkStayAwake, chkScreenOff, chkProtection].forEach((c) => {
       if (c) c.addEventListener('change', commitSettingsFromUI);
     });
 
     // Presets rápidos
     presetRadios.forEach((p) => {
       p.addEventListener('change', () => {
-        const fps = parseInt(p.dataset.fps, 10);
-        const br = parseInt(p.dataset.br, 10);
-        const res = parseInt(p.dataset.res, 10);
-
-        if (sliderFps) { sliderFps.value = fps; paintSlider(sliderFps); }
-        if (sliderBr) { sliderBr.value = br; paintSlider(sliderBr); }
-        if (selRes) { selRes.value = res; }
+        if (p.dataset.quality !== 'max') {
+          // Valores del perfil, ajustados a lo que ofrece este teléfono.
+          selectNearest(selCamRes, parseInt(p.dataset.camRes, 10));
+          checkNearest(camFpsBox, parseInt(p.dataset.camFps, 10));
+          selectNearest(selScrRes, parseInt(p.dataset.scrRes, 10));
+          checkNearest(scrFpsBox, parseInt(p.dataset.scrFps, 10));
+          if (sliderBr) { sliderBr.value = parseInt(p.dataset.br, 10); paintSlider(sliderBr); }
+        }
 
         commitSettingsFromUI();
         showToast(`Perfil aplicado: ${p.parentElement.querySelector('b')?.textContent || ''}`, 'info');
@@ -974,8 +1006,8 @@
 
   function applySettingsToUI() {
     const s = state.settings;
-    if (selRes) selRes.value = s.maxSize ?? 1080;
-    if (sliderFps) { sliderFps.value = s.maxFps || 30; paintSlider(sliderFps); }
+    presetRadios.forEach((r) => { r.checked = s.quality === 'max' ? r.value === 'max' : r.value === s.preset; });
+    renderOptions(lastCaps);
     if (sliderBr) { sliderBr.value = s.bitrate || 8; paintSlider(sliderBr); }
     if (sliderZoom) { sliderZoom.value = s.cameraZoom || 1; paintSlider(sliderZoom); }
 
@@ -987,6 +1019,7 @@
     if (chkNoAudio) chkNoAudio.checked = !!s.noAudio;
     if (chkStayAwake) chkStayAwake.checked = !!s.stayAwake;
     if (chkScreenOff) chkScreenOff.checked = !!s.screenOff;
+    if (chkProtection) chkProtection.checked = s.deviceProtection !== false;
   }
 
   function commitSettingsFromUI() {
@@ -995,9 +1028,14 @@
       return checked ? checked.value : def;
     };
 
+    const preset = [...presetRadios].find((r) => r.checked);
     state.settings = {
-      maxSize: selRes ? parseInt(selRes.value, 10) : 1080,
-      maxFps: sliderFps ? parseInt(sliderFps.value, 10) : 30,
+      quality: preset && preset.value === 'max' ? 'max' : 'custom',
+      preset: preset ? preset.value : null,
+      maxSize: selCamRes && selCamRes.value !== '' ? parseInt(selCamRes.value, 10) : 0,
+      maxFps: parseInt(getRadioVal($$('input[name="camFps"]'), '30'), 10),
+      screenRes: selScrRes && selScrRes.value !== '' ? parseInt(selScrRes.value, 10) : 0,
+      screenFps: parseInt(getRadioVal($$('input[name="screenFps"]'), '60'), 10),
       bitrate: sliderBr ? parseInt(sliderBr.value, 10) : 8,
       cameraZoom: sliderZoom ? parseFloat(sliderZoom.value) : 1,
       codec: getRadioVal(codecRadios, 'h264'),
@@ -1007,10 +1045,97 @@
       noAudio: chkNoAudio ? chkNoAudio.checked : true,
       stayAwake: chkStayAwake ? chkStayAwake.checked : true,
       screenOff: chkScreenOff ? chkScreenOff.checked : true,
+      deviceProtection: chkProtection ? chkProtection.checked : true,
     };
 
     saveSettings();
     scheduleProfilePreview();
+    scheduleApplyLive();
+  }
+
+  // ── 15.4 Aplicar ajustes en vivo a las sesiones abiertas ──────────
+  // El backend sólo relanza lo que cambia de verdad y conserva la posición
+  // de las ventanas. Espera a que el usuario termine de mover un deslizador.
+  let applyTimer = null;
+
+  function liveSettingsPayload() {
+    const s = state.settings;
+    return {
+      cameraFacing: s.cameraFacing || 'front',
+      maxFps: s.maxFps || 30,
+      maxSize: s.maxSize ?? 1080,
+      cameraZoom: s.cameraZoom || 1,
+      cameraTorch: !!s.cameraTorch,
+      noAudio: !!s.noAudio,
+      stayAwake: !!s.stayAwake,
+      screenOff: !!s.screenOff,
+      bitrate: s.bitrate || 8,
+      codec: s.codec || 'h264',
+      orientation: s.orientation || '0',
+      screenRes: s.screenRes ?? 0,
+      screenFps: s.screenFps || 60,
+      quality: s.quality || 'custom',
+      deviceProtection: s.deviceProtection !== false,
+    };
+  }
+
+  function scheduleApplyLive() {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(applyLive, 700);
+  }
+
+  async function applyLive({ silent = false } = {}) {
+    if (!window.api.applySettings) return;
+    const hasSessions = Object.keys(state.sessions).length > 0 || state.vcam.running;
+    let res;
+    try {
+      res = await window.api.applySettings(liveSettingsPayload());
+    } catch (e) {
+      console.error('[applySettings]', e);
+      if (hasSessions && !silent) showToast('No se pudieron aplicar los ajustes en vivo', 'error');
+      return;
+    }
+    if (!res || !res.ok || !hasSessions || silent) return;
+
+    const applied = [];
+    const failed = [];
+    (res.window || []).forEach((w) => {
+      const s = state.sessions[w.serial];
+      if (w.restarted && s) {
+        if (w.pid) s.pid = w.pid;
+        if (w.profile) {
+          s.resolution = profileRes(w.profile).replace('x', '×');
+          s.fps = w.profile.fps;
+        }
+        if (!w.camera && w.screenProfile) {
+          const sp = w.screenProfile;
+          s.resolution = sp.width ? `${sp.width}×${sp.height}` : 'nativa';
+          s.fps = sp.fps;
+        }
+        applied.push(w.camera ? `Cámara en ventana: ${describeProfile(w.profile)}`
+          : `Pantalla: ${w.screenProfile ? describeScreen(w.screenProfile) : 'actualizada'}`);
+      } else if (w.error) {
+        failed.push(w.error);
+      }
+    });
+    const v = res.vcam;
+    if (v && v.restarted && v.profile) {
+      state.vcam.profile = v.profile;
+      state.vcam.resolution = profileRes(v.profile);
+      applied.push(`Cámara virtual: ${describeProfile(v.profile)}`);
+    } else if (v && v.error) {
+      failed.push(v.error);
+    }
+
+    renderDeviceCards();
+    renderSessionsUI();
+    if (failed.length) {
+      showToast(`No se pudo aplicar: ${failed.join('. ')}`, 'error');
+    } else if (applied.length) {
+      showToast(`Ajustes aplicados. ${applied.join(' · ')}`, 'success');
+    } else {
+      showToast('Ajustes guardados (sin cambios para las sesiones abiertas)', 'info');
+    }
   }
 
   // ── 15.5 Vista previa del perfil real por dispositivo ─────────────
@@ -1047,11 +1172,152 @@
     return parts.join(' · ');
   }
 
+  // Opciones sin teléfono conectado (genéricas).
+  const GENERIC_CAM = { sizes: [[3840, 2160], [2560, 1440], [1920, 1080], [1280, 720]], fps: [15, 24, 30], torch: true };
+  const GENERIC_SCR = { sizes: [[0, 0, 0], [1080, 0, 0], [720, 0, 0]], fps: [30, 60, 90, 120] };
+  let lastCaps = null;
+
+  function tierName(short) {
+    if (short >= 2160) return '4K';
+    if (short >= 1600) return '3K';
+    if (short >= 1440) return '1440p';
+    if (short >= 1080) return '1080p';
+    if (short >= 720) return '720p';
+    return `${short}p`;
+  }
+
+  // Rellena un <select> con {value, label, eq} y elige el valor pedido o el
+  // más cercano por debajo (eq = valor equivalente, p. ej. nativa = 1080).
+  function fillSelect(sel, items, wanted) {
+    if (!sel) return;
+    const sig = items.map((i) => `${i.value}:${i.label}`).join('|');
+    if (sel.dataset.sig !== sig) {
+      sel.innerHTML = '';
+      items.forEach((i) => {
+        const o = document.createElement('option');
+        o.value = String(i.value);
+        o.textContent = i.label;
+        if (i.eq) o.dataset.eq = String(i.eq);
+        sel.appendChild(o);
+      });
+      sel.dataset.sig = sig;
+    }
+    selectNearest(sel, wanted);
+  }
+
+  function selectNearest(sel, wanted) {
+    if (!sel || !sel.options.length || Number.isNaN(wanted)) return;
+    const opts = [...sel.options];
+    const exact = opts.find((o) => +o.value === wanted || (o.dataset.eq && +o.dataset.eq <= wanted && wanted > 0));
+    if (wanted === 0 || exact) { sel.value = wanted === 0 ? '0' : exact.value; return; }
+    const lower = opts.filter((o) => +o.value > 0 && +o.value <= wanted).sort((x, y) => +y.value - +x.value)[0];
+    sel.value = (lower || opts[opts.length - 1]).value;
+  }
+
+  function fillSeg(box, name, values, wanted) {
+    if (!box) return;
+    const sig = values.join(',');
+    if (box.dataset.sig !== sig) {
+      box.innerHTML = values.map((v) =>
+        `<label><input type="radio" name="${name}" value="${v}"><span>${v} fps</span></label>`).join('');
+      box.dataset.sig = sig;
+    }
+    checkNearest(box, wanted);
+  }
+
+  function checkNearest(box, wanted) {
+    if (!box || Number.isNaN(wanted)) return;
+    const radios = [...box.querySelectorAll('input[type=radio]')];
+    if (!radios.length) return;
+    const vals = radios.map((r) => +r.value);
+    const pick = vals.includes(wanted) ? wanted
+      : (vals.filter((v) => v <= wanted).sort((x, y) => y - x)[0] ?? Math.min(...vals));
+    radios.forEach((r) => { r.checked = +r.value === pick; });
+  }
+
+  // Construye las opciones de Cámara y Pantalla a partir de lo que ofrece el
+  // teléfono (o genéricas si no hay ninguno conectado).
+  function renderOptions(res) {
+    const s = state.settings;
+    const camList = res && res.cameraOptions && res.cameraOptions.length ? res.cameraOptions : null;
+    const cam = camList ? (camList.find((c) => c.facing === s.cameraFacing) || camList[0]) : GENERIC_CAM;
+    const best = cam.sizes[0];
+    fillSelect(selCamRes, [
+      { value: 0, label: camList && best ? `Máxima del teléfono (${best[0]}×${best[1]})` : 'Máxima del teléfono' },
+      ...cam.sizes.map(([w, h]) => ({ value: h, label: `${tierName(h)} · ${w}×${h}` })),
+    ], s.maxSize ?? 0);
+    fillSeg(camFpsBox, 'camFps', cam.fps, s.maxFps || 30);
+
+    const so = res && res.screenOptions ? res.screenOptions : null;
+    const native = so ? so.sizes[0] : null;
+    const nativeShort = native ? Math.min(native[1], native[2]) : 0;
+    fillSelect(selScrRes, (so || GENERIC_SCR).sizes.map(([short, w, h]) => short === 0
+      ? { value: 0, label: so ? `Nativa (${w}×${h})` : 'Nativa', eq: nativeShort || undefined }
+      : { value: short, label: so ? `${tierName(short)} (${w}×${h})` : tierName(short) }), s.screenRes ?? 0);
+    fillSeg(scrFpsBox, 'screenFps', (so || GENERIC_SCR).fps, s.screenFps || 60);
+
+    // Linterna: sólo si la cámara elegida la tiene.
+    if (chkTorch) {
+      const ok = camList ? !!cam.torch : true;
+      chkTorch.disabled = !ok;
+      const row = chkTorch.closest('.row');
+      if (row) {
+        row.classList.toggle('is-disabled', !ok);
+        row.title = ok ? '' : 'Esta cámara no tiene linterna';
+      }
+    }
+
+    // Formatos sin codificador por hardware: no se ofrecen.
+    const hw = (res && res.hwCodecs) || [];
+    codecRadios.forEach((r) => {
+      const missing = hw.length > 0 && !hw.includes(r.value);
+      r.disabled = missing;
+      const lbl = r.closest('label');
+      lbl.classList.toggle('unavailable', missing);
+      lbl.title = missing ? `Este teléfono no tiene codificador por hardware para ${CODEC_LABEL[r.value]}` : '';
+    });
+    if (hw.length && codecRadios.length && [...codecRadios].every((r) => !r.checked || r.disabled)) {
+      const first = [...codecRadios].find((r) => !r.disabled);
+      if (first) first.checked = true;
+    }
+
+    // Zoom máximo real de la cámara elegida
+    if (sliderZoom && camList && cam.zoomMax) {
+      const max = Math.max(1, Math.min(10, cam.zoomMax));
+      if (String(sliderZoom.max) !== String(max)) {
+        sliderZoom.max = max;
+        if (parseFloat(sliderZoom.value) > max) sliderZoom.value = max;
+        paintSlider(sliderZoom);
+      }
+    }
+
+    if (capsHint) {
+      capsHint.hidden = !!camList;
+      if (res && res.capsError && !camList) capsHint.textContent = `No se pudieron leer las opciones del teléfono: ${res.capsError}`;
+    }
+  }
+
+  // Al tocar un control de calidad se abandona el perfil (pasa a personalizado).
+  function markCustom() {
+    presetRadios.forEach((r) => { r.checked = false; });
+  }
+
+  function describeScreen(sp) {
+    const size = sp.width ? `${sp.width}×${sp.height}` : 'nativa';
+    return `${size} · ${sp.fps} fps · ${CODEC_LABEL[sp.codec] || sp.codec}${sp.encoder ? ' por hardware' : ''} · ${sp.bitrateMbps} Mbps`;
+  }
+
   async function updateProfilePreview() {
     const box = $('profilePreview');
-    if (!box || !window.api.deviceProfile) return;
+    if (!window.api.deviceProfile) return;
     const dev = previewDevice();
-    if (!dev) { box.hidden = true; return; }
+    if (!dev) {
+      lastCaps = null;
+      renderOptions(null);
+      if (box) box.hidden = true;
+      if (specMax) specMax.textContent = 'Automático';
+      return;
+    }
 
     const seq = ++previewSeq;
     let res;
@@ -1062,41 +1328,44 @@
       return;
     }
     if (seq !== previewSeq || !res || !res.ok) return;
+    lastCaps = res;
+    renderOptions(res);
 
     const p = res.profile;
+    const sp = res.screenProfile;
+    const isMax = state.settings.quality === 'max';
+
+    // En "Máxima calidad" los controles muestran lo que se aplicará.
+    if (isMax) {
+      selectNearest(selCamRes, p.height);
+      checkNearest(camFpsBox, p.fps);
+      codecRadios.forEach((r) => { r.checked = r.value === p.codec; });
+      if (sliderBr) { sliderBr.value = p.bitrateMbps; paintSlider(sliderBr); }
+      if (selScrRes) selScrRes.value = '0';
+      if (sp) checkNearest(scrFpsBox, sp.fps);
+    }
+    if (panelImage) panelImage.classList.toggle('auto', isMax);
+    if (autoBadge) autoBadge.hidden = !isMax;
+
+    const mp = res.maxProfile;
+    if (specMax && mp) specMax.textContent = `${tierName(Math.min(mp.width, mp.height))} · ${mp.fps} fps`;
+
+    if (!box) return;
     box.hidden = false;
     $('ppDevice').textContent = dev.model || dev.serial;
-    $('ppSummary').textContent = describeProfile(p);
+    $('ppSummary').textContent = `Cámara: ${describeProfile(p)}` + (sp ? `\nPantalla: ${describeScreen(sp)}` : '');
     const notes = $('ppNotes');
     notes.innerHTML = '';
-    (p.verified ? p.notes : [res.capsError || 'No se pudieron leer las capacidades', ...p.notes])
-      .forEach((n) => {
-        const li = document.createElement('li');
-        li.textContent = n;
-        notes.appendChild(li);
-      });
-
-    // Formatos sin codificador por hardware en este teléfono
-    const hw = res.hwCodecs || [];
-    codecRadios.forEach((r) => {
-      const lbl = r.closest('label');
-      const missing = hw.length > 0 && !hw.includes(r.value);
-      lbl.classList.toggle('unavailable', missing);
-      lbl.title = missing
-        ? `${dev.model || 'Este teléfono'} no tiene codificador por hardware para ${CODEC_LABEL[r.value]}: se usará otro formato`
-        : '';
+    const all = [
+      ...(p.verified ? [] : [res.capsError || 'No se pudieron leer las capacidades']),
+      ...p.notes,
+      ...((sp && sp.notes) || []).map((n) => `Pantalla: ${n}`),
+    ];
+    all.forEach((n) => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      notes.appendChild(li);
     });
-
-    // Zoom máximo real de la cámara elegida
-    const cam = (res.cameras || []).find((c) => c.facing === p.facing);
-    if (sliderZoom && cam && cam.zoomMax) {
-      const max = Math.max(1, Math.min(10, cam.zoomMax));
-      if (String(sliderZoom.max) !== String(max)) {
-        sliderZoom.max = max;
-        if (parseFloat(sliderZoom.value) > max) sliderZoom.value = max;
-        paintSlider(sliderZoom);
-      }
-    }
   }
 
   function showProfileNotes(profile, what) {
@@ -1117,11 +1386,13 @@
   function renderHealthChip(serial) {
     const h = (state.health || {})[serial];
     if (!h || h.active === false || h.batteryTemp == null) return '';
-    const lvl = h.level || 0;
-    const cls = lvl >= 2 ? 'hot' : lvl === 1 ? 'warm' : '';
+    const lvl = h.protection === false ? 0 : (h.level || 0);
+    const hotUnprotected = h.protection === false && (h.thermalStatus ?? 0) >= 2;
+    const cls = lvl >= 2 ? 'hot' : (lvl === 1 || hotUnprotected) ? 'warm' : '';
     const status = ['normal', 'leve', 'moderado', 'grave', 'crítico', 'emergencia', 'apagado'][h.thermalStatus ?? 0] || '';
     const title = `Temperatura de la batería · estado térmico ${status}` +
-      (lvl ? ` · Protección activa: ${THROTTLE_LABEL[lvl]}` : '');
+      (h.protection === false ? ' · Protección desactivada'
+        : lvl ? ` · Protección activa: ${THROTTLE_LABEL[lvl]}` : '');
     return `<span class="chip temp ${cls}" title="${escHtml(title)}">${Number(h.batteryTemp).toFixed(1)} °C${lvl ? ` · ${THROTTLE_LABEL[lvl]}` : ''}</span>`;
   }
 
@@ -1316,6 +1587,8 @@
     renderRecents();
     await updateVcamStatus();
     await refreshDevices();
+    // El backend arranca con la protección activada: sincronizar la elección.
+    applyLive({ silent: true });
 
 
     // Timer de actualización de dispositivos cada 4s

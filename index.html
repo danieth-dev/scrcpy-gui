@@ -278,7 +278,16 @@
         <h2 class="h2" style="margin-top:0">Perfiles rápidos <span class="hint">· un clic y todo queda configurado</span></h2>
         <fieldset class="presets" aria-label="Perfiles rápidos">
           <div class="preset">
-            <input type="radio" name="preset" id="p1" value="normal" data-fps="30" data-br="8" data-res="1080" checked>
+            <input type="radio" name="preset" id="p0" value="max" data-quality="max">
+            <label for="p0">
+              <svg class="ico"><use href="#i-bolt"/></svg>
+              <b>Máxima calidad</b>
+              <small>Lo mejor que da tu teléfono</small>
+              <span class="spec mono" id="specMax">Automático</span>
+            </label>
+          </div>
+          <div class="preset">
+            <input type="radio" name="preset" id="p1" value="normal" data-cam-res="1080" data-cam-fps="30" data-scr-res="1080" data-scr-fps="60" data-br="8">
             <label for="p1">
               <svg class="ico"><use href="#i-phone"/></svg>
               <b>Normal</b>
@@ -287,7 +296,7 @@
             </label>
           </div>
           <div class="preset">
-            <input type="radio" name="preset" id="p2" value="calls" data-fps="30" data-br="6" data-res="720">
+            <input type="radio" name="preset" id="p2" value="calls" data-cam-res="720" data-cam-fps="30" data-scr-res="720" data-scr-fps="30" data-br="6">
             <label for="p2">
               <svg class="ico"><use href="#i-camera"/></svg>
               <b>Videollamadas</b>
@@ -296,59 +305,31 @@
             </label>
           </div>
           <div class="preset">
-            <input type="radio" name="preset" id="p3" value="stream" data-fps="60" data-br="20" data-res="1080">
+            <input type="radio" name="preset" id="p3" value="stream" data-cam-res="1080" data-cam-fps="30" data-scr-res="1080" data-scr-fps="60" data-br="20">
             <label for="p3">
               <svg class="ico"><use href="#i-monitor"/></svg>
               <b>Transmisión</b>
               <small>OBS, Twitch, YouTube</small>
-              <span class="spec mono">1080p · 60 fps</span>
+              <span class="spec mono">1080p · 20 Mbps</span>
             </label>
           </div>
           <div class="preset">
-            <input type="radio" name="preset" id="p4" value="games" data-fps="60" data-br="16" data-res="720">
+            <input type="radio" name="preset" id="p4" value="games" data-cam-res="720" data-cam-fps="30" data-scr-res="720" data-scr-fps="120" data-br="16">
             <label for="p4">
-              <svg class="ico"><use href="#i-bolt"/></svg>
+              <svg class="ico"><use href="#i-vcam"/></svg>
               <b>Juegos</b>
-              <small>Respuesta más rápida</small>
-              <span class="spec mono">720p · 60 fps</span>
+              <small>Pantalla lo más fluida posible</small>
+              <span class="spec mono">Pantalla 720p · máx. fps</span>
             </label>
           </div>
         </fieldset>
 
         <div class="cols">
-          <div class="panel">
-            <h3>Imagen y cámara</h3>
-            <div class="row">
-              <label for="res">Resolución</label>
-              <select class="field" id="res">
-                <option value="720">720p · HD</option>
-                <option value="1080" selected>1080p · Full HD</option>
-                <option value="1440">1440p · QHD</option>
-                <option value="0">Original</option>
-              </select>
-            </div>
-            <div class="row">
-              <label for="fps">Fluidez</label>
-              <div class="range">
-                <input type="range" id="fps" min="15" max="120" step="5" value="30" data-unit=" fps">
-                <output class="mono">30 fps</output>
-              </div>
-            </div>
-            <div class="row">
-              <label for="br">Calidad de imagen</label>
-              <div class="range">
-                <input type="range" id="br" min="2" max="50" value="8" data-unit=" Mbps">
-                <output class="mono">8 Mbps</output>
-              </div>
-            </div>
-            <div class="row">
-              <span class="lbl">Formato de video</span>
-              <div class="seg" role="radiogroup" aria-label="Formato">
-                <label><input type="radio" name="codec" value="h264" checked><span>H.264</span></label>
-                <label><input type="radio" name="codec" value="h265"><span>H.265</span></label>
-                <label><input type="radio" name="codec" value="av1"><span>AV1</span></label>
-              </div>
-            </div>
+          <div class="panel" id="panelImage">
+            <h3>Imagen <span class="chip auto-badge" id="autoBadge" hidden>Automático · Máxima calidad</span></h3>
+            <p class="caps-hint" id="capsHint">Conecta el teléfono para ver las opciones reales de su cámara y su pantalla.</p>
+
+            <h4 class="subhead">Cámara</h4>
             <div class="row">
               <span class="lbl">Cámara a usar</span>
               <div class="seg" role="radiogroup" aria-label="Cámara">
@@ -357,16 +338,15 @@
               </div>
             </div>
             <div class="row">
-              <span class="lbl">Orientación</span>
-              <div class="seg" role="radiogroup" aria-label="Orientación">
-                <label><input type="radio" name="rot" value="0" checked><span>Normal</span></label>
-                <label><input type="radio" name="rot" value="90"><span>90°</span></label>
-                <label><input type="radio" name="rot" value="180"><span>180°</span></label>
-                <label><input type="radio" name="rot" value="270"><span>270°</span></label>
-              </div>
+              <label for="camRes">Resolución</label>
+              <select class="field quality-ctl" id="camRes" aria-label="Resolución de la cámara"></select>
             </div>
             <div class="row">
-              <label for="zoom">Zoom de cámara</label>
+              <span class="lbl">Fluidez</span>
+              <div class="seg quality-ctl" role="radiogroup" aria-label="Fluidez de la cámara" id="camFps"></div>
+            </div>
+            <div class="row">
+              <label for="zoom">Zoom</label>
               <div class="range">
                 <input type="range" id="zoom" min="1" max="5" step="0.1" value="1" data-unit="×" data-dec="1">
                 <output class="mono">1.0×</output>
@@ -378,6 +358,42 @@
                 <input type="checkbox" id="cameraTorch" aria-label="Linterna">
                 <i></i>
               </label>
+            </div>
+
+            <h4 class="subhead">Pantalla <span class="hint">· «Ver pantalla»</span></h4>
+            <div class="row">
+              <label for="screenRes">Resolución</label>
+              <select class="field quality-ctl" id="screenRes" aria-label="Resolución de la pantalla"></select>
+            </div>
+            <div class="row">
+              <span class="lbl">Fluidez</span>
+              <div class="seg quality-ctl" role="radiogroup" aria-label="Fluidez de la pantalla" id="screenFps"></div>
+            </div>
+
+            <h4 class="subhead">Formato y calidad</h4>
+            <div class="row">
+              <span class="lbl">Formato de video</span>
+              <div class="seg quality-ctl" role="radiogroup" aria-label="Formato">
+                <label><input type="radio" name="codec" value="h264" checked><span>H.264</span></label>
+                <label><input type="radio" name="codec" value="h265"><span>H.265</span></label>
+                <label><input type="radio" name="codec" value="av1"><span>AV1</span></label>
+              </div>
+            </div>
+            <div class="row">
+              <label for="br">Calidad de imagen</label>
+              <div class="range quality-ctl">
+                <input type="range" id="br" min="2" max="50" value="8" data-unit=" Mbps">
+                <output class="mono">8 Mbps</output>
+              </div>
+            </div>
+            <div class="row">
+              <span class="lbl">Orientación</span>
+              <div class="seg" role="radiogroup" aria-label="Orientación">
+                <label><input type="radio" name="rot" value="0" checked><span>Normal</span></label>
+                <label><input type="radio" name="rot" value="90"><span>90°</span></label>
+                <label><input type="radio" name="rot" value="180"><span>180°</span></label>
+                <label><input type="radio" name="rot" value="270"><span>270°</span></label>
+              </div>
             </div>
             <div class="profile-preview" id="profilePreview" aria-live="polite" hidden>
               <span class="pp-title">Se aplicará en <b id="ppDevice"></b></span>
@@ -406,6 +422,15 @@
               <span class="lbl">Apagar la pantalla del teléfono</span>
               <label class="switch">
                 <input type="checkbox" id="screenOff" checked aria-label="Apagar pantalla">
+                <i></i>
+              </label>
+            </div>
+            <div class="row">
+              <span class="lbl">Proteger el teléfono (calor y batería)
+                <small class="row-hint">Baja la calidad si el teléfono se calienta. Desactívalo para máximo rendimiento: solo se detendrá en una emergencia.</small>
+              </span>
+              <label class="switch">
+                <input type="checkbox" id="deviceProtection" checked aria-label="Proteger el teléfono">
                 <i></i>
               </label>
             </div>

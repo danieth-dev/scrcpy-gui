@@ -101,11 +101,12 @@ pub async fn scrcpy_launch(
 ) -> Result<LaunchResult, String> {
     let mut opts = options.unwrap_or_default();
     // Si el teléfono ya está caliente, arrancar directamente con menos calidad
-    // (o no arrancar si está en estado crítico).
+    // (o no arrancar si está en estado crítico). Con la protección
+    // desactivada, sólo se niega en emergencia.
     let health = HealthMonitor::check(&serial).await;
-    let level = health.as_ref().map(health::required_level).unwrap_or(0);
+    let (level, refuse) = monitor.start_level(health.as_ref());
     let is_camera = opts.camera_only.unwrap_or(false);
-    if is_camera && level >= health::MAX_LEVEL {
+    if is_camera && refuse {
         return Ok(LaunchResult {
             ok: false,
             error: Some(format!(
@@ -120,7 +121,7 @@ pub async fn scrcpy_launch(
     }
     let res = scrcpy.launch(app.clone(), serial.clone(), opts).await;
     if res.ok {
-        monitor.ensure(serial, level.min(health::MAX_LEVEL - 1), app).await;
+        monitor.ensure(serial, if is_camera { level } else { 0 }, app).await;
     }
     Ok(res)
 }
@@ -222,8 +223,8 @@ pub async fn vcam_start(
     }
     let mut req = options.unwrap_or_default();
     let health = HealthMonitor::check(&serial).await;
-    let level = health.as_ref().map(health::required_level).unwrap_or(0);
-    if level >= health::MAX_LEVEL {
+    let (level, refuse) = monitor.start_level(health.as_ref());
+    if refuse {
         return Ok(serde_json::json!({
             "ok": false,
             "error": format!(
@@ -249,7 +250,7 @@ pub async fn vcam_start(
 #[tauri::command]
 pub async fn device_profile(
     serial: String,
-    options: Option<ProfileRequest>,
+    options: Option<ScrcpyOptions>,
     target: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if !crate::adb::is_valid_serial(&serial) {
@@ -257,14 +258,30 @@ pub async fn device_profile(
     }
     let target = if target.as_deref() == Some("vcam") { Target::Vcam } else { Target::Window };
     let caps = profile::device_caps(&serial).await;
-    let req = options.unwrap_or_default();
-    let resolved = profile::resolve(caps.as_ref().ok(), &req, target);
+    let opts = options.unwrap_or_default();
+    let wifi = profile::is_wifi_serial(&serial);
+    let mut req = opts.profile_request();
+    req.wifi = wifi;
+    let mut sreq = opts.screen_request();
+    sreq.wifi = wifi;
+    let caps_ok = caps.as_ref().ok();
+    // Lo que significaría "Máxima calidad" en este teléfono (para el perfil).
+    let mut max_req = req.clone();
+    max_req.quality = Some("max".into());
+    let mut max_sreq = sreq.clone();
+    max_sreq.quality = Some("max".into());
     Ok(serde_json::json!({
         "ok": true,
-        "profile": resolved,
-        "hwCodecs": caps.as_ref().map(|c| c.hw_codecs()).unwrap_or_default(),
-        "cameras": caps.as_ref().map(|c| c.cameras.clone()).unwrap_or_default(),
-        "capsError": caps.err(),
+        "profile": profile::resolve(caps_ok, &req, target),
+        "screenProfile": profile::resolve_screen(caps_ok, &sreq),
+        "maxProfile": profile::resolve(caps_ok, &max_req, target),
+        "maxScreenProfile": profile::resolve_screen(caps_ok, &max_sreq),
+        "hwCodecs": caps_ok.map(|c| c.hw_codecs()).unwrap_or_default(),
+        "cameras": caps_ok.map(|c| c.cameras.clone()).unwrap_or_default(),
+        "cameraOptions": caps_ok.map(profile::camera_options).unwrap_or_default(),
+        "screenOptions": caps_ok.and_then(|c| c.display.as_ref()).map(profile::screen_options),
+        "display": caps_ok.and_then(|c| c.display.clone()),
+        "capsError": caps.as_ref().err(),
     }))
 }
 
@@ -282,3 +299,96 @@ pub async fn vcam_install_driver() -> Result<serde_json::Value, String> {
     }
 }
 
+
+/// Ajustes de la pestaña Ajustes aplicados en vivo a las sesiones abiertas.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct LiveSettings {
+    #[serde(flatten)]
+    pub options: ScrcpyOptions,
+    #[serde(rename = "deviceProtection")]
+    pub device_protection: Option<bool>,
+}
+
+/// Aplica los ajustes a las sesiones abiertas. Sólo relanza las que cambian
+/// de verdad (p. ej. pedir 60 fps a una cámara que ya va a su máximo de 30 no
+/// reinicia nada). Las ventanas conservan posición y tamaño.
+#[tauri::command]
+pub async fn apply_settings(
+    app: AppHandle,
+    scrcpy: State<'_, ScrcpyManager>,
+    vcam: State<'_, VcamManager>,
+    monitor: State<'_, HealthMonitor>,
+    settings: LiveSettings,
+) -> Result<serde_json::Value, String> {
+    // Una aplicación cada vez: evita relanzamientos cruzados.
+    static APPLY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = APPLY.lock().await;
+
+    if let Some(p) = settings.device_protection {
+        monitor.set_protection(p);
+    }
+    let new = &settings.options;
+    let mut window = Vec::new();
+
+    for (serial, old) in scrcpy.all_sessions().await {
+        let mut merged = old.with_settings_from(new);
+        let is_camera = old.camera_only.unwrap_or(false);
+        let level = monitor.level(&serial);
+        merged.throttle = if is_camera && level > 0 { Some(level) } else { None };
+
+        let (changed, profile, screen) = if is_camera {
+            let before = profile::resolve_for(&serial, &old.profile_request(), Target::Window).await;
+            let after = profile::resolve_for(&serial, &merged.profile_request(), Target::Window).await;
+            (before.differs(&after), Some(after), None)
+        } else {
+            let before = profile::resolve_screen_for(&serial, &old.screen_request()).await;
+            let after = profile::resolve_screen_for(&serial, &merged.screen_request()).await;
+            (before.differs(&after) || old.mirror_differs(&merged), None, Some(after))
+        };
+
+        if changed {
+            let res = scrcpy.relaunch_with(app.clone(), serial.clone(), merged).await;
+            window.push(serde_json::json!({
+                "serial": serial,
+                "restarted": res.ok,
+                "error": res.error,
+                "pid": res.pid,
+                "profile": res.profile,
+                "screenProfile": res.screen_profile,
+                "camera": is_camera,
+            }));
+        } else {
+            window.push(serde_json::json!({
+                "serial": serial,
+                "restarted": false,
+                "profile": profile,
+                "screenProfile": screen,
+                "camera": is_camera,
+            }));
+        }
+    }
+
+    let mut vcam_res = serde_json::Value::Null;
+    if let Some(serial) = vcam.active_serial().await {
+        let level = monitor.level(&serial);
+        let mut req = new.profile_request();
+        req.throttle = if level > 0 { Some(level) } else { None };
+        let current = vcam.session_profile(&serial).await;
+        let target = profile::resolve_for(&serial, &req, Target::Vcam).await;
+        if current.as_ref().is_some_and(|c| c.differs(&target)) {
+            vcam_res = match vcam.restart_with(&serial, req, level, app.clone()).await {
+                Ok(p) => serde_json::json!({ "serial": serial, "restarted": true, "profile": p }),
+                Err(e) => serde_json::json!({ "serial": serial, "restarted": false, "error": e }),
+            };
+        } else {
+            vcam_res = serde_json::json!({ "serial": serial, "restarted": false, "profile": current });
+        }
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "protection": monitor.protection_enabled(),
+        "window": window,
+        "vcam": vcam_res,
+    }))
+}

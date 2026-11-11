@@ -6,8 +6,9 @@
 //! aplica el nivel de protección); si llega a crítico, se detienen. Cuando se
 //! enfría de forma sostenida, se recupera la calidad paso a paso.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -99,6 +100,12 @@ fn level_with(h: &Health, margin: f32) -> u8 {
     l
 }
 
+/// Emergencia real (Android está a punto de apagar el teléfono): se detiene la
+/// cámara aunque el usuario haya desactivado la protección.
+pub fn emergency(h: &Health) -> bool {
+    h.thermal_status.is_some_and(|s| s >= 5) || h.battery_temp_c.is_some_and(|t| t >= 50.0)
+}
+
 /// Nivel de protección que exige el estado actual (0-3).
 pub fn required_level(h: &Health) -> u8 {
     level_with(h, 0.0)
@@ -176,9 +183,23 @@ impl Controller {
 
 // ── Monitor ───────────────────────────────────────────────────────────────
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct HealthMonitor {
     active: Arc<Mutex<HashSet<String>>>,
+    /// Protección activada por el usuario (por defecto sí).
+    protection: Arc<AtomicBool>,
+    /// Nivel de protección vigente por teléfono.
+    levels: Arc<std::sync::Mutex<HashMap<String, u8>>>,
+}
+
+impl Default for HealthMonitor {
+    fn default() -> Self {
+        Self {
+            active: Arc::default(),
+            protection: Arc::new(AtomicBool::new(true)),
+            levels: Arc::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,11 +208,43 @@ struct HealthEvent<'a> {
     #[serde(flatten)]
     health: &'a Health,
     level: u8,
+    protection: bool,
 }
 
 impl HealthMonitor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_protection(&self, enabled: bool) {
+        self.protection.store(enabled, Ordering::SeqCst);
+        if !enabled {
+            self.levels.lock().unwrap().clear();
+        }
+    }
+
+    pub fn protection_enabled(&self) -> bool {
+        self.protection.load(Ordering::SeqCst)
+    }
+
+    /// Nivel de protección vigente en ese teléfono (0 si está desactivada).
+    pub fn level(&self, serial: &str) -> u8 {
+        if !self.protection_enabled() {
+            return 0;
+        }
+        self.levels.lock().unwrap().get(serial).copied().unwrap_or(0)
+    }
+
+    /// Nivel con el que arrancar una sesión y si hay que negarse a arrancar.
+    /// Con la protección desactivada sólo se niega en emergencia.
+    pub fn start_level(&self, h: Option<&Health>) -> (u8, bool) {
+        let Some(h) = h else { return (0, false) };
+        if self.protection_enabled() {
+            let l = required_level(h);
+            (l.min(MAX_LEVEL - 1), l >= MAX_LEVEL)
+        } else {
+            (0, emergency(h))
+        }
     }
 
     /// Lectura puntual (para decidir el nivel inicial antes de arrancar).
@@ -209,20 +262,25 @@ impl HealthMonitor {
                 return;
             }
         }
+        self.levels.lock().unwrap().insert(serial.clone(), initial_level);
         let active = self.active.clone();
+        let me = self.clone();
         tokio::spawn(async move {
-            monitor(serial.clone(), initial_level, app).await;
+            monitor(serial.clone(), initial_level, app, me.clone()).await;
             active.lock().await.remove(&serial);
+            me.levels.lock().unwrap().remove(&serial);
         });
     }
 }
 
-async fn monitor(serial: String, initial_level: u8, app: AppHandle) {
+async fn monitor(serial: String, initial_level: u8, app: AppHandle, hm: HealthMonitor) {
     let Ok(t) = profile::tools() else { return };
     let scrcpy = app.state::<ScrcpyManager>().inner().clone();
     let vcam = app.state::<VcamManager>().inner().clone();
     let mut ctl = Controller::new(initial_level);
     let mut warned_battery: Option<u8> = None;
+    let mut warned_hot = 0u8;
+    let mut was_enabled = hm.protection_enabled();
     let mut failures = 0u32;
 
     loop {
@@ -249,7 +307,25 @@ async fn monitor(serial: String, initial_level: u8, app: AppHandle) {
             }
         };
 
-        let _ = app.emit("device:health", HealthEvent { serial: &serial, health: &h, level: ctl.level });
+        let enabled = hm.protection_enabled();
+        if enabled != was_enabled {
+            // Al reactivarla se parte de cero; al desactivarla, apply_settings
+            // ya relanzó las sesiones con calidad completa.
+            ctl = Controller::new(0);
+            hm.levels.lock().unwrap().insert(serial.clone(), 0);
+            warned_hot = 0;
+            was_enabled = enabled;
+        }
+
+        let _ = app.emit(
+            "device:health",
+            HealthEvent {
+                serial: &serial,
+                health: &h,
+                level: if enabled { ctl.level } else { 0 },
+                protection: enabled,
+            },
+        );
 
         // Avisos de batería (una vez por umbral, sólo descargando).
         if !h.charging {
@@ -273,9 +349,36 @@ async fn monitor(serial: String, initial_level: u8, app: AppHandle) {
             warned_battery = None;
         }
 
-        let Some(new_level) = ctl.step(&h, Instant::now()) else { continue };
         let why = reason(&h);
         let is_camera = window.as_ref().is_some_and(|o| o.camera_only.unwrap_or(false));
+
+        let new_level = if enabled {
+            let Some(l) = ctl.step(&h, Instant::now()) else { continue };
+            hm.levels.lock().unwrap().insert(serial.clone(), l);
+            l
+        } else if emergency(&h) {
+            // Protección desactivada, pero el teléfono va a apagarse: frenar.
+            MAX_LEVEL
+        } else {
+            // Protección desactivada: sólo avisar, sin tocar la calidad.
+            let required = required_level(&h);
+            if required == 0 {
+                warned_hot = 0;
+            } else if required > warned_hot {
+                warned_hot = required;
+                let _ = app.emit(
+                    "device:alert",
+                    serde_json::json!({
+                        "serial": serial,
+                        "kind": "heat",
+                        "message": format!(
+                            "El teléfono se está calentando ({why}). La protección está desactivada: no se baja la calidad."
+                        ),
+                    }),
+                );
+            }
+            continue;
+        };
 
         if new_level >= MAX_LEVEL {
             if is_camera {
@@ -303,7 +406,7 @@ async fn monitor(serial: String, initial_level: u8, app: AppHandle) {
         let mut window_profile = None;
         if let (true, Some(mut opts)) = (is_camera, window.clone()) {
             opts.throttle = Some(new_level);
-            let res = scrcpy.launch(app.clone(), serial.clone(), opts).await;
+            let res = scrcpy.relaunch_with(app.clone(), serial.clone(), opts).await;
             window_profile = res.profile;
         }
         let mut vcam_profile = None;
@@ -372,6 +475,23 @@ mod tests {
         assert_eq!(c.step(&h(0, 38.0, 80, true), t0 + Duration::from_secs(80)), None);
         // 60 s enfriado: baja
         assert_eq!(c.step(&h(0, 38.0, 80, true), t0 + Duration::from_secs(111)), Some(0));
+    }
+
+    #[test]
+    fn emergency_threshold() {
+        assert!(!emergency(&h(4, 46.0, 80, true)));
+        assert!(emergency(&h(5, 36.0, 80, true)));
+        assert!(emergency(&h(0, 50.0, 80, true)));
+    }
+
+    #[test]
+    fn start_level_respects_toggle() {
+        let hm = HealthMonitor::default();
+        assert_eq!(hm.start_level(Some(&h(3, 36.0, 80, true))), (2, false));
+        assert_eq!(hm.start_level(Some(&h(4, 36.0, 80, true))), (2, true));
+        hm.set_protection(false);
+        assert_eq!(hm.start_level(Some(&h(4, 36.0, 80, true))), (0, false));
+        assert_eq!(hm.start_level(Some(&h(5, 36.0, 80, true))), (0, true));
     }
 
     #[test]
