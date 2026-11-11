@@ -188,16 +188,18 @@ struct ContentView: View {
     }
     
     private func setupPipeline() {
-        let width: Int32 = (camera.resolution == "4k") ? 3840 : (camera.resolution == "720p") ? 1280 : 1920
-        let height: Int32 = (camera.resolution == "4k") ? 2160 : (camera.resolution == "720p") ? 720 : 1080
+        // Camera outputs portrait frames, so swap width/height to match
+        // (e.g. 1080p portrait = 1080 wide × 1920 tall)
+        let shortSide: Int32 = (camera.resolution == "4k") ? 2160 : (camera.resolution == "720p") ? 720 : 1080
+        let longSide: Int32  = (camera.resolution == "4k") ? 3840 : (camera.resolution == "720p") ? 1280 : 1920
         
-        encoder.setup(width: width, height: height, fps: Int32(camera.fps))
-        encoder.onEncodedPacket = { data in
-            server.sendPacket(data)
+        encoder.setup(width: shortSide, height: longSide, fps: Int32(camera.fps))
+        encoder.onEncodedPacket = { [weak self] data in
+            self?.server.sendPacket(data)
         }
         
-        camera.onFrameCaptured = { sampleBuffer in
-            encoder.encode(sampleBuffer: sampleBuffer)
+        camera.onFrameCaptured = { [weak self] sampleBuffer in
+            self?.encoder.encode(sampleBuffer: sampleBuffer)
         }
         
         camera.setupCamera()
@@ -206,6 +208,8 @@ struct ContentView: View {
     
     private func reconfigurePipeline() {
         camera.stop()
+        encoder.destroy()
+        server.stop()          // Release port 50005 before re-binding
         setupPipeline()
     }
 }
