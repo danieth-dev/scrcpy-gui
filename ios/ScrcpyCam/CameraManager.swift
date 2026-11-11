@@ -40,6 +40,14 @@ class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
                 }
             }
             
+            // Remover entradas y salidas anteriores para permitir reconfiguración
+            for input in self.captureSession.inputs {
+                self.captureSession.removeInput(input)
+            }
+            for output in self.captureSession.outputs {
+                self.captureSession.removeOutput(output)
+            }
+            
             // Entrada de cámara
             guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.currentPosition),
                   let videoInput = try? AVCaptureDeviceInput(device: camera) else {
