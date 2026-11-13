@@ -1,12 +1,24 @@
 scrcpy GUI
 Copyright (c) 2026 danieth
 
-This product includes software developed as a graphical frontend for scrcpy.
+Interfaz gráfica independiente y no oficial para scrcpy. No está afiliada a
+Genymobile.
+
+Este producto incluye o distribuye software de terceros:
 
 scrcpy
 Copyright (c) Genymobile and contributors
 https://github.com/Genymobile/scrcpy
 Licensed under the Apache License, Version 2.0
 
-Electron and Chromium components are licensed under their respective licenses
-(see licenses bundled with Electron builds).
+Unity Capture (filtro DirectShow de la cámara virtual)
+Copyright (c) 2018 Bernhard Schelling
+https://github.com/schellingb/UnityCapture
+Licensed under the MIT License
+
+UxPlay para Windows (receptor AirPlay, programa aparte sin modificar)
+https://github.com/leapbtw/uxplay-windows · https://github.com/FDH2/UxPlay
+Licensed under the GNU General Public License v3.0
+
+Ver THIRD_PARTY_LICENSES.md para el detalle completo de los componentes
+(FFmpeg, SDL, libusb, adb, GStreamer, Qt...) y sus licencias.

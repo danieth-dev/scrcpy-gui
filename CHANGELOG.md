@@ -20,6 +20,23 @@ Versionado: [SemVer](https://semver.org/lang/es/).
   - `lib.rs`: Bandeja del sistema (Tray) nativa con menú contextual y soporte para minimizar a segundo plano.
 - **Limpieza de dependencias**: Eliminados 312 paquetes obsoletos de `node_modules` (incluyendo Chromium y Electron Builder) y eliminados más de 600 MB de antiguos binarios empaquetados.
 
+### Cámara virtual nativa
+- **Sin ffmpeg.exe**: el vídeo del servidor de scrcpy se decodifica dentro de la app con las DLL de FFmpeg que trae scrcpy y se envía directamente a "Unity Video Capture". 1080p a 30 fps sin pérdidas y hasta 4K en H.265.
+- **Reconexión automática** de la ventana y de la cámara virtual tras un corte de USB o Wi-Fi.
+- **Control de versión de FFmpeg**: la cámara virtual se niega a arrancar, con un mensaje claro, si las DLL no son de una versión probada.
+
+### Ajustes que se adaptan a cada teléfono
+- **Opciones reales del dispositivo**: resoluciones, fps, códecs por hardware, zoom y linterna se leen del teléfono. No se ofrece nada que no soporte.
+- **Cámara y pantalla por separado**. "Ver pantalla" interpreta la resolución por el lado corto (1080p = nativa en un 1080×2340).
+- **Perfil "Máxima calidad"** (por defecto): elige automáticamente lo mejor que da cada teléfono.
+- **Ajustes en vivo**: los cambios se aplican a las sesiones abiertas sin cerrarlas y conservan la posición de la ventana.
+- **Protección del dispositivo opcional**: vigila la temperatura y la batería. El freno de emergencia sigue activo siempre.
+
+### Instalador y licencias
+- Instalador NSIS que registra el driver de la cámara virtual (32 y 64 bits) al instalar y lo elimina al desinstalar.
+- Añadido `THIRD_PARTY_LICENSES.md` (scrcpy, FFmpeg, SDL, libusb, adb, Unity Capture y UxPlay), que también se instala junto a la app.
+- La versión mostrada en la app y la que usa la comprobación de actualizaciones salen de `Cargo.toml`. Antes estaba escrita a mano en tres sitios distintos.
+
 
 ## [1.3.1] — 2026-10-23
 

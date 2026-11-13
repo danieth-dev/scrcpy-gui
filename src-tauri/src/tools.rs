@@ -142,7 +142,7 @@ pub fn get_tools_status() -> ToolsStatus {
 
 pub fn get_app_info() -> AppInfo {
     AppInfo {
-        version: "1.3.1".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         name: "scrcpy GUI".to_string(),
         author: "danieth-dev".to_string(),
         homepage: "https://github.com/danieth-dev/scrcpy-gui".to_string(),
@@ -173,7 +173,7 @@ fn cmp_semver(a: &str, b: &str) -> i32 {
 }
 
 pub async fn check_updates() -> UpdateCheckResult {
-    let current = "1.3.1".to_string();
+    let current = env!("CARGO_PKG_VERSION").to_string();
     let owner = "danieth-dev";
     let repo = "scrcpy-gui";
     let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");

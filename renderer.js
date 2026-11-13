@@ -959,6 +959,14 @@
       });
     });
 
+    // Versión real del ejecutable (Cargo.toml), no un texto fijo en el HTML
+    window.api.getAppInfo().then((info) => {
+      if (!info || !info.version) return;
+      if (appVersion) appVersion.textContent = `v${info.version}`;
+      const aboutVersion = $('aboutVersion');
+      if (aboutVersion) aboutVersion.textContent = info.version;
+    }).catch(() => {});
+
     // About buttons
     if (btnCheckUpdates) {
       btnCheckUpdates.addEventListener('click', async () => {
