@@ -26,4 +26,5 @@ regex = "1.11"
 open = "5.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 libloading = "0.9.0"
+base64 = "0.22"
 yuvutils-rs = { version = "0.8.3", features = ["rayon"] }
