@@ -36,6 +36,27 @@ const FRAME_WIDTH: usize = 104;
 const FRAME_HEIGHT: usize = 108;
 const FRAME_FORMAT: usize = 116;
 
+// Versiones mayores de FFmpeg en las que se ha comprobado la disposición de
+// AVFrame de arriba y los ID de códec/formato: avutil 57-60 (FFmpeg 5.x-8.x)
+// y avcodec 59-62. Con otra versión no se lee memoria a ciegas: se avisa.
+const AVUTIL_MAJORS: std::ops::RangeInclusive<u32> = 57..=60;
+const AVCODEC_MAJORS: std::ops::RangeInclusive<u32> = 59..=62;
+
+fn check_ffmpeg_versions(avutil: u32, avcodec: u32) -> Result<(), String> {
+    let (u, c) = (avutil >> 16, avcodec >> 16);
+    if AVUTIL_MAJORS.contains(&u) && AVCODEC_MAJORS.contains(&c) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Versión de FFmpeg no compatible (avutil {u}, avcodec {c}). \
+             La cámara virtual está probada con avutil {}-{} y avcodec {}-{}: \
+             usa el FFmpeg que trae scrcpy o actualiza scrcpy GUI.",
+            AVUTIL_MAJORS.start(), AVUTIL_MAJORS.end(),
+            AVCODEC_MAJORS.start(), AVCODEC_MAJORS.end()
+        ))
+    }
+}
+
 type Ptr = *mut c_void;
 
 struct Api {
@@ -97,6 +118,9 @@ impl Api {
                         .map_err(|e| format!("Falta {} en FFmpeg: {e}", $name))?
                 };
             }
+            let avutil_version: unsafe extern "C" fn() -> u32 = sym!(avutil, "avutil_version");
+            let avcodec_version: unsafe extern "C" fn() -> u32 = sym!(avcodec, "avcodec_version");
+            check_ffmpeg_versions(avutil_version(), avcodec_version())?;
             Ok(Self {
                 find_decoder: sym!(avcodec, "avcodec_find_decoder"),
                 alloc_context3: sym!(avcodec, "avcodec_alloc_context3"),
@@ -360,6 +384,24 @@ pub fn run_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffmpeg_version_guard() {
+        let v = |major: u32, minor: u32| (major << 16) | (minor << 8);
+        // Las DLL de scrcpy 4.1: avutil 60, avcodec 62.
+        assert!(check_ffmpeg_versions(v(60, 8), v(62, 28)).is_ok());
+        assert!(check_ffmpeg_versions(v(57, 0), v(59, 0)).is_ok());
+        assert!(check_ffmpeg_versions(v(61, 0), v(62, 0)).is_err());
+        assert!(check_ffmpeg_versions(v(60, 0), v(63, 0)).is_err());
+        assert!(check_ffmpeg_versions(v(56, 0), v(58, 0)).is_err());
+    }
+
+    #[test]
+    fn bundled_ffmpeg_passes_guard() {
+        // Con vendor/scrcpy presente, sus DLL reales deben cargar y pasar el control.
+        let Some(dir) = scrcpy_dir() else { return };
+        available(&dir).unwrap();
+    }
 
     fn scrcpy_dir() -> Option<PathBuf> {
         let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("vendor").join("scrcpy");

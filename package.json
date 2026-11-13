@@ -1,6 +1,6 @@
 {
   "name": "scrcpy-gui",
-  "version": "1.3.1",
+  "version": "2.0.0",
   "description": "Interfaz gráfica nativa para scrcpy en Rust con Tauri v2",
   "scripts": {
     "start": "node scripts/sync-ui.js && tauri dev",
