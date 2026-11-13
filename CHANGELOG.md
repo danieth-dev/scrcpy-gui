@@ -34,6 +34,7 @@ Versionado: [SemVer](https://semver.org/lang/es/).
 
 ### Instalador y licencias
 - Instalador NSIS que registra el driver de la cámara virtual (32 y 64 bits) al instalar y lo elimina al desinstalar.
+- El botón "Instalar driver" registra los dos drivers, de 32 y 64 bits, con una sola petición de Administrador. Antes, en la app instalada, solo registraba el de 64 bits. Se han eliminado los `.bat` de `vendor/`, que ya no hacían falta.
 - Añadido `THIRD_PARTY_LICENSES.md` (scrcpy, FFmpeg, SDL, libusb, adb, Unity Capture y UxPlay), que también se instala junto a la app.
 - La versión mostrada en la app y la que usa la comprobación de actualizaciones salen de `Cargo.toml`. Antes estaba escrita a mano en tres sitios distintos.
 

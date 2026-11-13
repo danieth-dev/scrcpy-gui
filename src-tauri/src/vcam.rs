@@ -853,47 +853,25 @@ impl VcamManager {
         Ok(())
     }
 
+    /// Registra (o repara) el driver "Unity Video Capture" de 64 y 32 bits con
+    /// una sola petición de Administrador. El instalador ya lo hace; esto es
+    /// para repararlo o para la versión portable.
     pub fn trigger_driver_install() -> Result<(), String> {
-        let mut bat_path = None;
-        let mut dll_path = None;
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                for ancestor in dir.ancestors().take(6) {
-                    let b = ancestor.join("Instalar_Camara_Virtual.bat");
-                    let c1 = ancestor.join("vendor").join("UnityCaptureFilter64.dll");
-                    let c2 = ancestor.join("gui").join("vendor").join("UnityCaptureFilter64.dll");
-                    if bat_path.is_none() && b.is_file() {
-                        bat_path = Some(b);
-                    }
-                    if dll_path.is_none() && c1.is_file() {
-                        dll_path = Some(c1);
-                    }
-                    if dll_path.is_none() && c2.is_file() {
-                        dll_path = Some(c2);
-                    }
-                }
-            }
-        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let vendor = exe
+            .parent()
+            .into_iter()
+            .flat_map(|d| d.ancestors().take(6))
+            .flat_map(|a| [a.join("vendor"), a.join("gui").join("vendor")])
+            .find(|v| v.join("UnityCaptureFilter64.dll").is_file())
+            .ok_or_else(|| "No se encontró UnityCaptureFilter64.dll".to_string())?;
 
-        // Las rutas se pasan como argumentos de PowerShell con comillas simples escapadas.
-        let ps_quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
-
-        if let Some(bat) = bat_path {
-            let bat_str = bat.to_string_lossy().to_string();
-            no_window_std(std::process::Command::new("powershell.exe").args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &format!("Start-Process -FilePath {} -Verb RunAs", ps_quote(&bat_str)),
-            ]))
-            .spawn()
-            .map_err(|e| format!("Error solicitando elevación de Administrador: {e}"))?;
-            return Ok(());
-        }
-
-        let dll = dll_path.ok_or_else(|| "No se encontró UnityCaptureFilter64.dll".to_string())?;
-        let dll_str = dll.to_string_lossy().to_string();
+        let script = driver_register_script(&vendor);
+        // -EncodedCommand (UTF-16LE + base64) evita problemas de comillas en
+        // rutas con espacios al pasar por la elevación.
+        let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
 
         no_window_std(std::process::Command::new("powershell.exe").args([
             "-NoProfile",
@@ -901,13 +879,39 @@ impl VcamManager {
             "Bypass",
             "-Command",
             &format!(
-                "Start-Process regsvr32.exe -ArgumentList {} -Verb RunAs",
-                ps_quote(&format!("\"{dll_str}\""))
+                "Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait \
+                 -ArgumentList '-NoProfile','-EncodedCommand','{encoded}'"
             ),
         ]))
         .spawn()
         .map_err(|e| format!("Error solicitando elevación de Administrador: {e}"))?;
 
         Ok(())
+    }
+}
+
+/// Script de PowerShell que registra en silencio los filtros de 64 y 32 bits.
+fn driver_register_script(vendor: &std::path::Path) -> String {
+    let quote = |p: &std::path::Path| format!("'{}'", p.to_string_lossy().replace('\'', "''"));
+    let dll64 = vendor.join("UnityCaptureFilter64.dll");
+    let dll32 = vendor.join("UnityCaptureFilter32.dll");
+    let mut script = format!(r#"& "$env:windir\System32\regsvr32.exe" /s {}"#, quote(&dll64));
+    if dll32.is_file() {
+        script += &format!(r#"; & "$env:windir\SysWOW64\regsvr32.exe" /s {}"#, quote(&dll32));
+    }
+    script
+}
+
+#[cfg(test)]
+mod driver_tests {
+    #[test]
+    fn register_script_quotes_paths() {
+        let vendor = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("vendor");
+        let s = super::driver_register_script(&vendor);
+        eprintln!("{s}");
+        assert!(s.contains(r"System32\regsvr32.exe"));
+        assert!(s.contains(r"SysWOW64\regsvr32.exe"));
+        let odd = super::driver_register_script(std::path::Path::new(r"C:\Program Files\it's"));
+        assert!(odd.contains(r"'C:\Program Files\it''s\UnityCaptureFilter64.dll'"));
     }
 }
