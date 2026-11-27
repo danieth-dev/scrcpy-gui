@@ -4,7 +4,7 @@ Todos los cambios notables de **scrcpy GUI** se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Versionado: [SemVer](https://semver.org/lang/es/).
 
-## [2.0.0] — 2026-11-10
+## [2.0.0] — 2026-11-27
 
 ### Solo Android
 - **Eliminado el soporte de iPhone**: la vista iPhone, el receptor AirPlay (UxPlay), el túnel USB hacia la app ScrcpyCam, la integración con OBS Virtual Cam y la app iOS. La app se centra en Android, con su propia cámara virtual.
@@ -36,6 +36,8 @@ Versionado: [SemVer](https://semver.org/lang/es/).
 - **Protección del dispositivo opcional**: vigila la temperatura y la batería. El freno de emergencia sigue activo siempre.
 
 ### Instalador y licencias
+- Logo nuevo en el instalador, la ventana, la barra de título y la bandeja del sistema.
+- README reescrito con capturas de la versión actual, instrucciones de instalación y requisitos por función.
 - Instalador NSIS que registra el driver de la cámara virtual (32 y 64 bits) al instalar y lo elimina al desinstalar.
 - El botón "Instalar driver" registra los dos drivers, de 32 y 64 bits, con una sola petición de Administrador. Antes, en la app instalada, solo registraba el de 64 bits. Se han eliminado los `.bat` de `vendor/`, que ya no hacían falta.
 - Añadido `THIRD_PARTY_LICENSES.md` (scrcpy, FFmpeg, SDL, libusb, adb y Unity Capture), que también se instala junto a la app.
