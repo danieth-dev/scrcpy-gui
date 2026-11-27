@@ -16,9 +16,5 @@ Copyright (c) 2018 Bernhard Schelling
 https://github.com/schellingb/UnityCapture
 Licensed under the MIT License
 
-UxPlay para Windows (receptor AirPlay, programa aparte sin modificar)
-https://github.com/leapbtw/uxplay-windows · https://github.com/FDH2/UxPlay
-Licensed under the GNU General Public License v3.0
-
 Ver THIRD_PARTY_LICENSES.md para el detalle completo de los componentes
-(FFmpeg, SDL, libusb, adb, GStreamer, Qt...) y sus licencias.
+(FFmpeg, SDL, libusb, adb...) y sus licencias.

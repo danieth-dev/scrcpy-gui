@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,28 +102,6 @@ pub fn find_scrcpy() -> Option<PathBuf> {
 
 pub fn find_adb() -> Option<PathBuf> {
     resolve_tool("scrcpy", "adb.exe")
-}
-
-pub fn find_uxplay() -> Option<PathBuf> {
-    resolve_tool("uxplay", "uxplay.exe")
-        .or_else(|| resolve_tool("uxplay", "uxplay-windows.exe"))
-}
-
-
-pub fn find_obs() -> Option<PathBuf> {
-    let mut candidates = vec![
-        PathBuf::from(r"C:\Program Files\obs-studio\bin\64bit\obs64.exe"),
-        PathBuf::from(r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe"),
-    ];
-
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        candidates.push(Path::new(&local_app_data).join(r"Programs\obs-studio\bin\64bit\obs64.exe"));
-    }
-    if let Ok(program_files) = std::env::var("ProgramFiles") {
-        candidates.push(Path::new(&program_files).join(r"obs-studio\bin\64bit\obs64.exe"));
-    }
-
-    candidates.into_iter().find(|p| p.is_file())
 }
 
 pub fn get_tools_status() -> ToolsStatus {

@@ -6,6 +6,10 @@ Versionado: [SemVer](https://semver.org/lang/es/).
 
 ## [2.0.0] — 2026-11-10
 
+### Solo Android
+- **Eliminado el soporte de iPhone**: la vista iPhone, el receptor AirPlay (UxPlay), el túnel USB hacia la app ScrcpyCam, la integración con OBS Virtual Cam y la app iOS. La app se centra en Android, con su propia cámara virtual.
+- El instalador ya no incluye UxPlay (≈256 MB sin comprimir) ni sus obligaciones de licencia GPL.
+
 ### Reescritura de Arquitectura (Migración a Rust + Tauri v2)
 - **Migración a Tauri v2 (Rust)**: Eliminado completamente Electron y Node.js del backend. El motor de ventana ahora utiliza WebView2 nativo de Windows y el backend está compilado en Rust.
 - **Reducción masiva de memoria**: El consumo de RAM en reposo disminuyó de ~180-250 MB a **~30-35 MB** (reducción del 85%).
@@ -13,10 +17,9 @@ Versionado: [SemVer](https://semver.org/lang/es/).
 - **Inicio instantáneo**: Tiempo de carga reducido a menos de 0.3 segundos.
 - **Puente de compatibilidad transparente (`tauri-bridge.js`)**: Adaptador que implementa la API de `window.api` conectando el frontend existente con los comandos nativos de Tauri v2 sin requerir cambios en `renderer.js`.
 - **Backend asíncrono y seguro**:
-  - `tools.rs`: Búsqueda de ejecutables en árbol de ancestros (`vendor/scrcpy/`, `vendor/uxplay/`) y comprobación de actualizaciones contra GitHub Releases.
+  - `tools.rs`: Búsqueda de ejecutables en árbol de ancestros (`vendor/scrcpy/`) y comprobación de actualizaciones contra GitHub Releases.
   - `adb.rs`: Ejecución segura de comandos ADB sin invocación de shell (mitigando inyección de comandos), detección en paralelo de dispositivos y gestión de reconexiones Wi-Fi.
   - `scrcpy.rs`: Gestor concurrente de sesiones (`ScrcpyManager`), detección de tamaños nativos de cámara (`--list-camera-sizes`), streaming de eventos de textura y auto-recuperación ante microcortes.
-  - `iphone.rs`: Ciclo de vida de UxPlay con drenado continuo de pipes y soporte para OBS Virtual Camera.
   - `lib.rs`: Bandeja del sistema (Tray) nativa con menú contextual y soporte para minimizar a segundo plano.
 - **Limpieza de dependencias**: Eliminados 312 paquetes obsoletos de `node_modules` (incluyendo Chromium y Electron Builder) y eliminados más de 600 MB de antiguos binarios empaquetados.
 
@@ -35,7 +38,7 @@ Versionado: [SemVer](https://semver.org/lang/es/).
 ### Instalador y licencias
 - Instalador NSIS que registra el driver de la cámara virtual (32 y 64 bits) al instalar y lo elimina al desinstalar.
 - El botón "Instalar driver" registra los dos drivers, de 32 y 64 bits, con una sola petición de Administrador. Antes, en la app instalada, solo registraba el de 64 bits. Se han eliminado los `.bat` de `vendor/`, que ya no hacían falta.
-- Añadido `THIRD_PARTY_LICENSES.md` (scrcpy, FFmpeg, SDL, libusb, adb, Unity Capture y UxPlay), que también se instala junto a la app.
+- Añadido `THIRD_PARTY_LICENSES.md` (scrcpy, FFmpeg, SDL, libusb, adb y Unity Capture), que también se instala junto a la app.
 - La versión mostrada en la app y la que usa la comprobación de actualizaciones salen de `Cargo.toml`. Antes estaba escrita a mano en tres sitios distintos.
 
 

@@ -69,36 +69,6 @@ SOFTWARE.
 
 ---
 
-## UxPlay para Windows (`vendor\uxplay\`)
-
-Es el receptor AirPlay que se usa para la función de iPhone.
-
-- **Licencia:** GNU General Public License v3.0 (GPLv3). El detalle de sus
-  componentes está en `vendor\uxplay\LICENSE.rtf`.
-- **Código fuente:**
-  - Port para Windows: <https://github.com/leapbtw/uxplay-windows> (el
-    código de cada versión está en su página de releases).
-  - Proyecto original: <https://github.com/FDH2/UxPlay>.
-- **Componentes que incluye:**
-  - GStreamer (LGPL).
-  - Qt 6 (LGPL 3).
-  - FFmpeg con x264 y x265 (GPL).
-  - mDNSResponder (BSD de 3 cláusulas / Apache 2.0).
-  - Otras librerías, cada una con su licencia.
-
-UxPlay es un programa aparte que scrcpy GUI lanza como proceso independiente.
-Se distribuye **sin modificar** junto a la app, como "agregado" en el sentido
-de la GPLv3 (sección 5). Por eso la licencia GPL no se extiende al código de
-scrcpy GUI.
-
-**Oferta de código fuente:** si no puedes conseguir el código de la versión
-incluida en los enlaces de arriba, abre un issue en
-<https://github.com/danieth-dev/scrcpy-gui/issues> y te lo facilitaremos, como
-exige la GPLv3, durante al menos tres años desde la publicación de cada
-versión del instalador.
-
----
-
 ## Componentes de la propia app
 
 El ejecutable `scrcpy-gui.exe` se compila con [Tauri](https://tauri.app)

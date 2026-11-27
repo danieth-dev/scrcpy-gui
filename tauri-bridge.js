@@ -84,20 +84,6 @@
     onScrcpyStopped: (cb) => listenEvent('scrcpy:stopped', cb),
     onScrcpyTexture: (cb) => listenEvent('scrcpy:texture', cb),
 
-    // ── iPhone / AirPlay (UxPlay + OBS) ────────────────────────────
-    iphoneToolsStatus:    ()     => invoke('iphone_tools_status'),
-    iphoneStartUxPlay:    (opts) => invoke('iphone_start_uxplay', { opts }),
-    iphoneStopUxPlay:     ()     => invoke('iphone_stop_uxplay'),
-    iphoneObsVirtualCam:  (opts) => invoke('iphone_obs_virtual_cam', { opts }),
-    onIphoneUxPlayStopped: (cb)  => listenEvent('iphone:uxplayStopped', cb),
-
-    // ── iPhone / USB Direct Camera ─────────────────────────────────
-    iphoneUsbStatus:       ()     => invoke('iphone_usb_status'),
-    iphoneUsbStartStream:  (opts) => invoke('iphone_usb_start_stream', { opts }),
-    iphoneUsbStopStream:   ()     => invoke('iphone_usb_stop_stream'),
-    onIphoneUsbDeviceChange: (cb) => listenEvent('iphone:usbDeviceChange', cb),
-    onIphoneUsbStats:        (cb) => listenEvent('iphone:usbStats', cb),
-
     // ── DirectShow Virtual Camera (Windows / OBS / Discord / Zoom) ──
     vcamGetStatus:     ()                => invoke('vcam_get_status'),
     vcamStart:         (serial, options) => invoke('vcam_start', { serial, options }),

@@ -64,9 +64,6 @@ Se generan:
 No hace falta `ffmpeg.exe`: la cámara virtual decodifica en proceso con las
 DLL de FFmpeg que ya trae el release de scrcpy (`avcodec-*.dll`, `avutil-*.dll`).
 
-> Tamaño: `vendor/uxplay` (≈256 MB) es la mayor parte del instalador. Si no
-> se distribuye la función de iPhone/AirPlay, quitarlo reduce mucho la descarga.
-
 ## 5. GitHub Release
 
 1. GitHub → tu repo → **Releases** → **Draft a new release**  
