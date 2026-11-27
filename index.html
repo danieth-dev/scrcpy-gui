@@ -368,19 +368,19 @@
           </div>
 
           <div class="panel">
-            <h3>Cámara Virtual DirectShow (OBS, Zoom, Discord)</h3>
+            <h3>Cámara virtual (Zoom, Meet, Teams, Discord, OBS)</h3>
             <div class="row">
-              <span class="lbl">Estado del driver en Windows</span>
+              <span class="lbl">Driver «Unity Video Capture»</span>
               <span class="chip" id="vcamDriverStatus">Comprobando…</span>
             </div>
+            <p class="sub" id="vcamDriverHint" style="margin-top:var(--s2);font-size:12px;color:var(--text-3)">
+              Se instala junto con la app. En tus programas de videollamada elige la cámara <b>Unity Video Capture</b>.
+            </p>
             <div class="row" style="margin-top:var(--s2)">
-              <button class="btn btn-primary" id="btnInstallVcam">
-                <svg class="ico"><use href="#i-bolt"/></svg>Instalar Driver DirectShow
+              <button class="btn btn-ghost" id="btnInstallVcam">
+                <svg class="ico"><use href="#i-refresh"/></svg><span id="btnInstallVcamLabel">Reparar driver</span>
               </button>
             </div>
-            <p class="sub" style="margin-top:var(--s2);font-size:12px;color:var(--text-3)">
-              Registra el dispositivo nativo <b>Unity Video Capture</b> para que OBS, Zoom, Meet y Discord reconozcan tu cámara Android a máxima calidad sin capturar ventana.
-            </p>
           </div>
         </div>
 

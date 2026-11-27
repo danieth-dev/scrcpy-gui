@@ -4,6 +4,11 @@ Todos los cambios notables de **scrcpy GUI** se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Versionado: [SemVer](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Corregido
+- **Panel de la cámara virtual:** ahora deja claro que el driver ya viene instalado con la app. El estado «Instalado» sale en verde (antes usaba un color que no existía), el botón pasa a ser «Reparar driver» como acción secundaria y conserva su icono. Si falta el driver de 32 bits, el panel muestra «Incompleto».
+
 ## [2.0.0] — 2026-11-27
 
 ### Solo Android
