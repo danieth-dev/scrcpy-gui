@@ -58,7 +58,6 @@
       <button class="nav" data-view="devices" aria-current="page"><svg class="ico"><use href="#i-phone"/></svg>Dispositivos</button>
       <button class="nav" data-view="wifi"><svg class="ico"><use href="#i-wifi"/></svg>Wi-Fi</button>
       <button class="nav" data-view="active"><svg class="ico"><use href="#i-activity"/></svg>En uso<span class="count" id="sessionsBadge" style="display:none">0</span></button>
-      <button class="nav" data-view="iphone"><svg class="ico"><use href="#i-phone"/></svg>iPhone</button>
       <button class="nav" data-view="settings"><svg class="ico"><use href="#i-sliders"/></svg>Ajustes</button>
       <div class="rail-foot">
         <button class="btn" id="btnRescan"><svg class="ico"><use href="#i-refresh"/></svg>Buscar teléfonos</button>
@@ -197,73 +196,6 @@
           <h2>No hay nada abierto</h2>
           <p>Abre un teléfono desde <b>Dispositivos</b>.</p>
         </div>
-      </section>
-
-      <!-- VISTA: IPHONE -->
-      <section class="view" data-view="iphone" id="viewIphone" hidden>
-        <div class="head">
-          <div>
-            <h1>iPhone y iPad</h1>
-            <p class="sub">Usa tu iPhone como cámara o comparte su pantalla en el PC.</p>
-          </div>
-        </div>
-        <div class="modes" role="radiogroup" aria-label="Modo de conexión">
-          <div class="mode">
-            <input type="radio" name="iphoneMode" id="m1" value="usb" checked>
-            <label for="m1">
-              <svg class="ico"><use href="#i-usb"/></svg>
-              <span><b>Cable USB</b><small>Recomendado · sin retraso</small></span>
-            </label>
-          </div>
-          <div class="mode">
-            <input type="radio" name="iphoneMode" id="m2" value="air">
-            <label for="m2">
-              <svg class="ico"><use href="#i-wifi"/></svg>
-              <span><b>Wi-Fi (AirPlay)</b><small>Sin cables</small></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <h3 id="mode-title" style="border:0;padding:0">Cámara por cable USB</h3>
-              <p id="mode-sub">Imagen en alta calidad y sin retraso</p>
-            </div>
-            <span class="state" id="iphoneStateBadge" role="status">
-              <span class="led"></span><span id="iphoneStateText">Sin iPhone</span>
-            </span>
-          </div>
-          <div class="probe">
-            <span class="spin"></span>
-            <div>
-              <b id="probe-t">Buscando iPhone conectado por cable…</b>
-              <small id="probe-s">Conecta tu iPhone al PC con el cable y desbloquéalo</small>
-            </div>
-          </div>
-          <div class="row">
-            <span class="lbl">Usar como webcam en Zoom, Meet o Teams (OBS Virtual Cam)</span>
-            <label class="switch">
-              <input type="checkbox" id="chkObsVirtualCam" aria-label="Webcam virtual">
-              <i></i>
-            </label>
-          </div>
-          <div>
-            <button class="btn btn-primary" id="btnStartIphone">
-              <svg class="ico"><use href="#i-camera"/></svg><span id="btnStartIphoneLabel">Iniciar</span>
-            </button>
-          </div>
-        </div>
-
-        <details class="panel howto" style="margin-top:var(--s4)">
-          <summary>Cómo se usa</summary>
-          <ol>
-            <li>Conecta el iPhone al PC con el <b>cable USB</b> o conéctate a la misma red Wi-Fi.</li>
-            <li>Abre la app <b>scrcpy Cam</b> en el iPhone (o activa "Duplicar pantalla" para AirPlay).</li>
-            <li>Pulsa <b>Iniciar</b> aquí arriba.</li>
-            <li>Opcional: en el iPhone toca <b>Apagar pantalla</b> para ahorrar batería y evitar calentamiento.</li>
-          </ol>
-        </details>
       </section>
 
       <!-- VISTA: AJUSTES -->
@@ -459,7 +391,7 @@
           <p>scrcpy GUI versión <span id="aboutVersion">2.0.0</span> (Rust + Tauri v2). La app te avisará cuando haya una versión nueva.</p>
           <button class="btn" id="btnCheckUpdates">Buscar actualizaciones</button>
           <button class="btn btn-ghost" id="btnOpenGithub">Ver versiones en GitHub</button>
-          <span class="legal">Interfaz independiente, no oficial, basada en scrcpy de Genymobile (Apache-2.0). Incluye Unity Capture (MIT) y UxPlay (GPL-3.0); las licencias están en THIRD_PARTY_LICENSES.md, en la carpeta de instalación.</span>
+          <span class="legal">Interfaz independiente, no oficial, basada en scrcpy de Genymobile (Apache-2.0). Incluye Unity Capture (MIT); las licencias están en THIRD_PARTY_LICENSES.md, en la carpeta de instalación.</span>
           <button class="btn btn-ghost" id="btnResetSettings" style="flex-basis:auto">
             <svg class="ico"><use href="#i-refresh"/></svg>Restablecer valores
           </button>

@@ -13,7 +13,6 @@ Interfaz gráfica nativa de alto rendimiento para [scrcpy](https://github.com/Ge
 - **Control de cámara y pantalla:** Mirror, modo webcam, captura de pantalla y grabación.
 - **Presets de calidad:** Normal, Webcam, Streams y Gaming con aplicación de ajustes en vivo.
 - **Ajustes avanzados:** Control de orientación, facing (frontal/trasera), zoom, linterna, bitrate, codec y FPS.
-- **iPhone / AirPlay y USB:** Soporte para UxPlay y túnel USB directo hacia la app ScrcpyCam.
 - **Bandeja del sistema (Tray):** Minimización a segundo plano en los iconos ocultos de Windows para mantener las sesiones activas.
 - **Actualizaciones automáticas:** Chequeo directo con GitHub Releases.
 

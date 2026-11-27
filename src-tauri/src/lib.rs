@@ -2,7 +2,6 @@ pub mod adb;
 pub mod commands;
 pub mod decoder;
 pub mod health;
-pub mod iphone;
 pub mod profile;
 pub mod scrcpy;
 pub mod tools;
@@ -13,19 +12,16 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::Manager;
 
 use crate::commands::*;
-use crate::iphone::IphoneManager;
 use crate::scrcpy::ScrcpyManager;
 use crate::vcam::VcamManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let scrcpy_manager = ScrcpyManager::new();
-    let iphone_manager = IphoneManager::new();
     let vcam_manager = VcamManager::new();
 
     tauri::Builder::default()
         .manage(scrcpy_manager)
-        .manage(iphone_manager)
         .manage(vcam_manager)
         .manage(crate::health::HealthMonitor::new())
 
@@ -115,13 +111,6 @@ pub fn run() {
             scrcpy_launch,
             scrcpy_stop,
             scrcpy_get_sessions,
-            iphone_tools_status,
-            iphone_start_uxplay,
-            iphone_stop_uxplay,
-            iphone_obs_virtual_cam,
-            iphone_usb_status,
-            iphone_usb_start_stream,
-            iphone_usb_stop_stream,
             vcam_get_status,
             vcam_start,
             vcam_stop,

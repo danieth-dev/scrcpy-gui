@@ -14,8 +14,6 @@
     selectedDevice: null,
     settings: loadSettings(),
     recents: loadRecents(),
-    iphoneMode: 'usb',    // 'usb' | 'air'
-    iphoneRunning: false,
     pollTimer: null,
     clockTimer: null,
   };
@@ -65,18 +63,6 @@
   const sessionsList = $('sessionsList');
   const sessionsEmpty = $('sessionsEmpty');
   const btnStopAll = $('btnStopAll');
-
-  // iPhone
-  const iphoneModeRadios = $$('input[name="iphoneMode"]');
-  const modeTitle = $('mode-title');
-  const modeSub = $('mode-sub');
-  const probeT = $('probe-t');
-  const probeS = $('probe-s');
-  const iphoneStateBadge = $('iphoneStateBadge');
-  const iphoneStateText = $('iphoneStateText');
-  const btnStartIphone = $('btnStartIphone');
-  const btnStartIphoneLabel = $('btnStartIphoneLabel');
-  const chkObsVirtualCam = $('chkObsVirtualCam');
 
   // Ajustes
   const presetRadios = $$('input[name="preset"]');
@@ -839,85 +825,7 @@
     }
   }
 
-  // ── 14. Funciones iPhone ──────────────────────────────────────────
-  function setupIphone() {
-    iphoneModeRadios.forEach((radio) => {
-      radio.addEventListener('change', () => {
-        state.iphoneMode = radio.value;
-        const isUsb = radio.value === 'usb';
-        modeTitle.textContent = isUsb ? 'Cámara por cable USB' : 'Pantalla por AirPlay';
-        modeSub.textContent = isUsb
-          ? 'Imagen en alta calidad y sin retraso'
-          : 'Comparte la pantalla del iPhone sin cables';
-        probeT.textContent = isUsb
-          ? 'Buscando iPhone conectado por cable…'
-          : 'Esperando al iPhone en AirPlay…';
-        probeS.textContent = isUsb
-          ? 'Conecta tu iPhone al PC con el cable y desbloquéalo'
-          : 'En el iPhone abre el Centro de control y elige “Duplicar pantalla”';
-      });
-    });
-
-    if (btnStartIphone) {
-      btnStartIphone.addEventListener('click', async () => {
-        if (state.iphoneRunning) {
-          btnStartIphone.disabled = true;
-          if (state.iphoneMode === 'usb') {
-            await window.api.iphoneUsbStopStream();
-          } else {
-            await window.api.iphoneStopUxPlay();
-          }
-          btnStartIphone.disabled = false;
-          state.iphoneRunning = false;
-          btnStartIphoneLabel.textContent = 'Iniciar';
-          iphoneStateBadge.dataset.state = '';
-          iphoneStateText.textContent = 'Detenido';
-          showToast('iPhone detenido', 'info');
-        } else {
-          btnStartIphone.disabled = true;
-          if (state.iphoneMode === 'usb') {
-            const res = await window.api.iphoneUsbStartStream();
-            btnStartIphone.disabled = false;
-            if (res.ok) {
-              state.iphoneRunning = true;
-              btnStartIphoneLabel.textContent = 'Detener';
-              iphoneStateBadge.dataset.state = 'ok';
-              iphoneStateText.textContent = 'Transmitiendo por USB';
-              showToast(res.message || 'Túnel USB listo', 'success');
-            } else {
-              showToast(res.error, 'error');
-            }
-          } else {
-            const res = await window.api.iphoneStartUxPlay();
-            btnStartIphone.disabled = false;
-            if (res.ok) {
-              state.iphoneRunning = true;
-              btnStartIphoneLabel.textContent = 'Detener';
-              iphoneStateBadge.dataset.state = 'ok';
-              iphoneStateText.textContent = 'AirPlay activo';
-              showToast('UxPlay iniciado para AirPlay', 'success');
-            } else {
-              showToast(res.error, 'error');
-            }
-          }
-        }
-      });
-    }
-
-    if (chkObsVirtualCam) {
-      chkObsVirtualCam.addEventListener('change', async () => {
-        const start = chkObsVirtualCam.checked;
-        const res = await window.api.iphoneObsVirtualCam({ start });
-        if (res.ok) {
-          showToast(res.message || (start ? 'OBS Virtual Cam iniciada' : 'OBS Virtual Cam detenida'), 'info');
-        } else {
-          showToast(res.error, 'warn');
-        }
-      });
-    }
-  }
-
-  // ── 15. Ajustes y Presets ─────────────────────────────────────────
+  // ── 14. Ajustes y Presets ─────────────────────────────────────────
   function setupSettings() {
     // Controles que definen la calidad: tocarlos pasa a "personalizado".
     const onQuality = () => { markCustom(); commitSettingsFromUI(); };
@@ -1540,16 +1448,6 @@
       }
     });
 
-    window.api.onIphoneUxPlayStopped(() => {
-      state.iphoneRunning = false;
-      if (btnStartIphoneLabel) btnStartIphoneLabel.textContent = 'Iniciar';
-      if (iphoneStateBadge) {
-        iphoneStateBadge.dataset.state = '';
-        iphoneStateText.textContent = 'Detenido';
-      }
-      showToast('UxPlay se cerró', 'info');
-    });
-
     setupHealthEvents();
 
     if (window.api.onVcamStats) {
@@ -1583,7 +1481,6 @@
     setupNavigation();
     setupTitlebar();
     setupWifi();
-    setupIphone();
     setupSettings();
     setupModal();
     setupTauriEvents();

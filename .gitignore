@@ -13,10 +13,5 @@ Thumbs.db
 vendor/scrcpy/**
 !vendor/scrcpy/.gitkeep
 
-# Binarios de uxplay
-vendor/uxplay/**
-!vendor/uxplay/.gitkeep
-
-*.ipa
 build/
 

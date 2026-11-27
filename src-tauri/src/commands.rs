@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use tauri::{AppHandle, Manager, State, Window};
 
 use crate::adb::{self, DevicesResult, SimpleResult};
-use crate::iphone::{IphoneManager, IphoneToolsStatus, IphoneUsbStatus, SimpleIphoneResult, UxPlayOptions};
 use crate::scrcpy::{LaunchResult, ScrcpyManager, ScrcpyOptions};
 use crate::tools::{self, AppInfo, ToolsStatus, UpdateCheckResult};
 use crate::health::{self, HealthMonitor};
@@ -140,69 +139,6 @@ pub async fn scrcpy_get_sessions(
     scrcpy: State<'_, ScrcpyManager>,
 ) -> Result<Vec<String>, String> {
     Ok(scrcpy.get_sessions().await)
-}
-
-#[tauri::command]
-pub async fn iphone_tools_status(
-    iphone: State<'_, IphoneManager>,
-) -> Result<IphoneToolsStatus, String> {
-    Ok(iphone.tools_status().await)
-}
-
-#[tauri::command]
-pub async fn iphone_start_uxplay(
-    app: AppHandle,
-    iphone: State<'_, IphoneManager>,
-    opts: Option<UxPlayOptions>,
-) -> Result<SimpleIphoneResult, String> {
-    Ok(iphone.start_uxplay(app, opts).await)
-}
-
-#[tauri::command]
-pub async fn iphone_stop_uxplay(
-    iphone: State<'_, IphoneManager>,
-) -> Result<SimpleIphoneResult, String> {
-    Ok(iphone.stop_uxplay().await)
-}
-
-#[tauri::command]
-pub async fn iphone_obs_virtual_cam(
-    iphone: State<'_, IphoneManager>,
-    opts: Option<serde_json::Value>,
-) -> Result<SimpleIphoneResult, String> {
-    let start = opts
-        .as_ref()
-        .and_then(|v| v.get("start"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    Ok(iphone.obs_virtual_cam(start).await)
-}
-
-#[tauri::command]
-pub async fn iphone_usb_status(
-    iphone: State<'_, IphoneManager>,
-) -> Result<IphoneUsbStatus, String> {
-    Ok(iphone.usb_status().await)
-}
-
-#[tauri::command]
-pub async fn iphone_usb_start_stream(
-    iphone: State<'_, IphoneManager>,
-    opts: Option<serde_json::Value>,
-) -> Result<SimpleIphoneResult, String> {
-    let port = opts
-        .as_ref()
-        .and_then(|v| v.get("port"))
-        .and_then(|v| v.as_u64())
-        .map(|p| p as u32);
-    Ok(iphone.usb_start_stream(port).await)
-}
-
-#[tauri::command]
-pub async fn iphone_usb_stop_stream(
-    iphone: State<'_, IphoneManager>,
-) -> Result<SimpleIphoneResult, String> {
-    Ok(iphone.usb_stop_stream().await)
 }
 
 #[tauri::command]
