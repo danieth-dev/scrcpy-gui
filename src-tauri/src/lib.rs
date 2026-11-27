@@ -39,10 +39,16 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Salir completamente", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
+            let mut tray_builder = TrayIconBuilder::new()
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .tooltip("scrcpy GUI — Control de Android")
+                .tooltip("scrcpy GUI — Control de Android");
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            let _tray = tray_builder
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -78,6 +84,9 @@ pub fn run() {
                 .build(app);
 
             if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();

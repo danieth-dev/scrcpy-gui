@@ -1,76 +1,83 @@
 # scrcpy GUI
 
-Interfaz gráfica nativa de alto rendimiento para [scrcpy](https://github.com/Genymobile/scrcpy): mirror de Android, cámara como webcam, conexión WiFi y presets de calidad.
+Interfaz gráfica para Windows de [scrcpy](https://github.com/Genymobile/scrcpy). Sirve para ver y controlar tu teléfono **Android** desde el PC y para usar su cámara como **webcam** en Zoom, Meet, Teams, Discord u OBS. Se conecta por cable o por Wi-Fi y no hace falta usar la línea de comandos.
 
-> **Arquitectura nativa en Rust con Tauri v2.** Consume ~30 MB de RAM (un 85% menos que Electron) con arranque instantáneo. El motor de streaming sigue siendo scrcpy oficial (Genymobile, Apache-2.0).
+> Interfaz independiente y **no oficial**. El motor de vídeo es el scrcpy oficial de Genymobile (Apache-2.0); esta app añade la interfaz, la cámara virtual y el ajuste automático a cada teléfono.
 
-![Demo de scrcpy GUI](docs/demo.gif)
+![Pantalla de dispositivos](docs/screenshots/dispositivos.png)
 
-## Características
+## Descarga e instalación
 
-- **Ultra ligero:** Backend nativo en Rust con Tauri v2 y WebView2 del sistema.
-- **Dispositivos USB y WiFi:** Detección automática en paralelo, vinculación (`adb pair`), conexión y "Activar y conectar" (`:5555`).
-- **Control de cámara y pantalla:** Mirror, modo webcam, captura de pantalla y grabación.
-- **Presets de calidad:** Normal, Webcam, Streams y Gaming con aplicación de ajustes en vivo.
-- **Ajustes avanzados:** Control de orientación, facing (frontal/trasera), zoom, linterna, bitrate, codec y FPS.
-- **Bandeja del sistema (Tray):** Minimización a segundo plano en los iconos ocultos de Windows para mantener las sesiones activas.
-- **Actualizaciones automáticas:** Chequeo directo con GitHub Releases.
+1. Descarga `scrcpy GUI_x.y.z_x64-setup.exe` de la [última versión](https://github.com/danieth-dev/scrcpy-gui/releases/latest).
+2. Ejecútalo. Pide permisos de Administrador una sola vez para instalar la app y el driver de la cámara virtual **Unity Video Capture**.
+3. En el teléfono, activa la **depuración USB** (Ajustes › Acerca del teléfono › toca 7 veces "Número de compilación" y luego, en Opciones de desarrollador, activa "Depuración USB").
+4. Conecta el teléfono por cable y acepta el aviso "Permitir depuración USB".
 
-## Métricas de rendimiento
+El instalador ya trae scrcpy, adb y todo lo necesario. No hay que instalar nada más.
 
-| Métrica | Versión anterior (Electron) | Versión actual (Rust + Tauri v2) |
-|---|---|---|
-| **Memoria RAM en reposo** | ~180 – 250 MB | **~30 – 35 MB** (reducción del 85%) |
-| **Tamaño del binario base** | ~180 MB | **~14 MB** |
-| **Tiempo de arranque** | 1.8 – 2.5 s | **< 0.3 s (instantáneo)** |
-| **Dependencias `node_modules`** | 315 paquetes | **3 paquetes** (sólo CLI de Tauri) |
+## Qué puedes hacer
+
+- **Ver pantalla:** controla el teléfono en una ventana del PC con el ratón y el teclado. Puedes usar la resolución nativa y la frecuencia de refresco real de la pantalla (por ejemplo, 120 Hz).
+- **Cámara en ventana:** muestra la cámara frontal o trasera en una ventana.
+- **Cámara virtual:** el teléfono aparece como la webcam "Unity Video Capture" en cualquier programa de videollamadas o en OBS. No necesita OBS ni otros programas. Llega hasta 4K en H.265 si tu teléfono lo admite.
+- **Ajustes adaptados a tu teléfono:** la app lee las resoluciones, los fps, los formatos de vídeo con aceleración por hardware, el zoom y la linterna de cada cámara y solo te ofrece lo que tu teléfono puede dar.
+- **Perfiles rápidos:** Máxima calidad (automático, por defecto), Normal, Videollamadas, Transmisión y Juegos.
+- **Cambios en vivo:** los ajustes se aplican al momento a lo que tengas abierto, sin cerrar la ventana ni moverla de sitio.
+- **Protección del dispositivo (opcional):** vigila la temperatura y la batería y baja la calidad si el teléfono se calienta. Aunque la desactives, el freno de emergencia sigue activo.
+- **Wi-Fi:** activa el Wi-Fi con el cable puesto (un clic) o vincúlalo sin cable con un código (Android 11+). Los teléfonos usados aparecen en "Usados recientemente".
+- **Reconexión automática** si se corta el cable o el Wi-Fi.
+- **Bandeja del sistema:** al cerrar la ventana, la app sigue en segundo plano con las sesiones abiertas.
+- **Buscar actualizaciones:** desde Ajustes › Acerca de, la app comprueba en GitHub si hay una versión nueva.
+
+![Ajustes adaptados al teléfono](docs/screenshots/ajustes.png)
 
 ## Requisitos
 
-- Windows 10/11 x64 (con WebView2, instalado por defecto en el sistema).
-- Teléfono Android con depuración USB activada.
-- Cámara del teléfono como webcam: Android 12+ (soporte Camera2).
-- Para desarrollo y compilación: [Rust 1.80+](https://rustup.rs/) y [Node.js 18+](https://nodejs.org/).
+- Windows 10 u 11 de 64 bits, con WebView2 (viene instalado en Windows).
+- Teléfono Android con depuración USB:
+  - Ver pantalla: Android 5.0 o superior.
+  - Cámara en ventana y cámara virtual: Android 12 o superior.
+  - Vincular por Wi-Fi sin cable: Android 11 o superior.
 
-## Uso rápido (desarrollo)
+## Rendimiento
+
+- **Instalador:** ~12,6 MB, con scrcpy y el driver de la cámara virtual incluidos.
+- **Memoria:** el proceso de la app usa ~30 MB. La interfaz corre en WebView2, el motor web de Windows, que se comparte con el sistema y añade sus propios procesos.
+- **Cámara virtual:** el vídeo se decodifica dentro de la app con las librerías de FFmpeg que trae scrcpy. No usa `ffmpeg.exe` ni hay retraso añadido. Va a 1080p a 30 fps sin perder frames y llega a 4K en H.265.
+
+## Desarrollo
+
+Necesitas [Rust 1.80+](https://rustup.rs/), [Node.js 18+](https://nodejs.org/) y el [release oficial de scrcpy para Windows](https://github.com/Genymobile/scrcpy/releases) (`scrcpy-win64-vX.Y.zip`, descomprimido).
 
 ```bash
-cd gui
+git clone https://github.com/danieth-dev/scrcpy-gui.git
+cd scrcpy-gui
 npm install
 npm run vendor:sync -- "C:\ruta\a\scrcpy-win64-vX.Y"
 npm run dev
 ```
 
-O haciendo doble clic en **`Abrir_scrcpy_GUI.bat`** en la raíz del proyecto.
-
-1. Conecta el teléfono por USB (depuración activa).  
-2. **WiFi → Activar y conectar** (una sola vez).  
-3. Desconecta el cable.  
-4. **Recientes → Pantalla** o **Cámara**.
-
-## Compilación de producción
-
-Para generar el ejecutable optimizado (`.exe` standalone de ~14 MB):
+Para generar el instalador:
 
 ```bash
 npm run build
 ```
 
-El ejecutable se genera en:
-`gui/src-tauri/target/release/scrcpy-gui.exe`
+Queda en `src-tauri/target/release/bundle/nsis/scrcpy GUI_<versión>_x64-setup.exe`.
 
-## Publicar una nueva versión
+El código Rust está en `src-tauri/src/`:
 
-Sigue la guía detallada en [docs/RELEASING.md](docs/RELEASING.md).
+| Archivo | Qué hace |
+|---|---|
+| `scrcpy.rs` | Lanza scrcpy para "Ver pantalla" y "Cámara en ventana" y lo reconecta si se corta. |
+| `vcam.rs` | Cámara virtual: conexión directa con el servidor de scrcpy y envío de imágenes a Unity Capture. |
+| `decoder.rs` | Decodificación de H.264/H.265 con FFmpeg y conversión de color. |
+| `profile.rs` | Lee las capacidades del teléfono y elige la mejor configuración. |
+| `health.rs` | Temperatura y batería del teléfono, y protección del dispositivo. |
+| `adb.rs` | Detección de dispositivos y conexión por Wi-Fi. |
 
-Los usuarios pueden comprobar versiones en **Ajustes → Buscar actualizaciones**.
-
-### Repositorio oficial
-
-[github.com/danieth-dev/scrcpy-gui](https://github.com/danieth-dev/scrcpy-gui)
+Para publicar una versión, sigue [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Licencia
 
-Apache License 2.0 — ver [LICENSE](LICENSE) y [NOTICE](NOTICE).
-
-scrcpy © Genymobile. Esta GUI © el autor indicado en `package.json`.
+Apache License 2.0: ver [LICENSE](LICENSE) y [NOTICE](NOTICE). Los componentes de terceros incluidos en el instalador (scrcpy, FFmpeg, SDL, libusb, adb y Unity Capture) y sus licencias están en [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

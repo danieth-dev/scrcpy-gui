@@ -28,7 +28,6 @@
     <symbol id="i-balance" viewBox="0 0 24 24"><path d="M12 4v16M5 7h14M5 7l-2.5 6a3 3 0 0 0 5 0zM19 7l-2.5 6a3 3 0 0 0 5 0z"/></symbol>
     <symbol id="i-gamepad" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10" rx="5"/><path d="M7 10v4M5 12h4M16 11h.01M18 13h.01"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
-    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M5 17V10a7 7 0 0 1 14 0v7z"/><path d="M8 5L6.5 3M16 5l1.5-2M9.5 11h.01M14.5 11h.01"/></symbol>
     <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
     <symbol id="i-unplug" viewBox="0 0 24 24"><path d="m19 5 3-3M2 22l3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="m7.5 13.5 2.5-2.5M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
@@ -40,7 +39,7 @@
     <!-- Titlebar -->
     <header class="titlebar" id="titlebar" data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
-        <svg class="ico logo"><use href="#i-logo"/></svg>scrcpy <i>GUI</i>
+        <img class="logo" src="logo.png" alt="" draggable="false">scrcpy <i>GUI</i>
       </div>
       <div class="drag" data-tauri-drag-region></div>
       <div class="pill" id="toolStatusPill" role="status" data-state="ok">
@@ -388,7 +387,7 @@
         <div class="panel about">
 
           <h3 style="flex-basis:100%">Acerca de</h3>
-          <p>scrcpy GUI versión <span id="aboutVersion">2.0.0</span> (Rust + Tauri v2). La app te avisará cuando haya una versión nueva.</p>
+          <p>scrcpy GUI versión <span id="aboutVersion">2.0.0</span> (Rust + Tauri v2). Pulsa «Buscar actualizaciones» para ver si hay una versión nueva.</p>
           <button class="btn" id="btnCheckUpdates">Buscar actualizaciones</button>
           <button class="btn btn-ghost" id="btnOpenGithub">Ver versiones en GitHub</button>
           <span class="legal">Interfaz independiente, no oficial, basada en scrcpy de Genymobile (Apache-2.0). Incluye Unity Capture (MIT); las licencias están en THIRD_PARTY_LICENSES.md, en la carpeta de instalación.</span>
