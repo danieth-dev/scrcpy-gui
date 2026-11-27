@@ -605,18 +605,28 @@
       state.vcam.fps = status.fps || 0;
 
       if (vcamDriverStatus) {
-        if (state.vcam.isDriverInstalled) {
-          vcamDriverStatus.className = 'chip';
-          vcamDriverStatus.style.color = 'var(--primary)';
-          vcamDriverStatus.style.borderColor = 'var(--primary)';
-          vcamDriverStatus.textContent = 'Instalado ("Unity Video Capture")';
-          if (btnInstallVcam) btnInstallVcam.textContent = 'Reinstalar Driver';
-        } else {
-          vcamDriverStatus.className = 'chip';
-          vcamDriverStatus.style.color = 'var(--warn)';
-          vcamDriverStatus.style.borderColor = 'var(--warn)';
-          vcamDriverStatus.textContent = 'No instalado';
-          if (btnInstallVcam) btnInstallVcam.textContent = 'Instalar Driver DirectShow';
+        const has64 = state.vcam.isDriverInstalled;
+        const has32 = !!status.isDriver32Installed;
+        const complete = has64 && has32;
+        const label = $('btnInstallVcamLabel');
+        const hint = $('vcamDriverHint');
+        vcamDriverStatus.className = 'chip';
+        vcamDriverStatus.style.color = complete ? 'var(--accent)' : 'var(--warn)';
+        vcamDriverStatus.style.borderColor = complete ? 'var(--accent)' : 'var(--warn)';
+        vcamDriverStatus.textContent = complete ? 'Instalado'
+          : has64 ? 'Incompleto (falta 32 bits)'
+          : 'No instalado';
+        if (label) label.textContent = complete ? 'Reparar driver' : 'Instalar driver';
+        if (btnInstallVcam) {
+          btnInstallVcam.classList.toggle('btn-primary', !complete);
+          btnInstallVcam.classList.toggle('btn-ghost', complete);
+        }
+        if (hint) {
+          hint.innerHTML = complete
+            ? 'Se instala junto con la app. En tus programas de videollamada elige la cámara <b>Unity Video Capture</b>. Usa «Reparar» solo si no aparece.'
+            : has64
+              ? 'Las apps de 64 bits ya ven la cámara; algunas de 32 bits no. Pulsa «Instalar driver» para completarlo (pedirá permiso de Administrador).'
+              : 'Sin el driver, Zoom, Meet o OBS no verán la cámara del teléfono. Pulsa «Instalar driver» (pedirá permiso de Administrador).';
         }
       }
       renderDeviceCards();

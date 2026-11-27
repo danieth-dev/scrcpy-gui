@@ -240,6 +240,9 @@ pub struct VcamStatus {
     pub running: bool,
     #[serde(rename = "isDriverInstalled")]
     pub is_driver_installed: bool,
+    /// Filtro de 32 bits (lo usan las apps de 32 bits).
+    #[serde(rename = "isDriver32Installed")]
+    pub is_driver32_installed: bool,
     pub serial: Option<String>,
     pub resolution: Option<String>,
     pub fps: Option<u32>,
@@ -467,7 +470,10 @@ impl VcamManager {
         Self::default()
     }
 
-    pub fn is_driver_installed() -> bool {
+    /// ¿Está registrado el filtro "Unity Video Capture"? `bits` = 64 o 32
+    /// (vista del registro correspondiente).
+    pub fn driver_registered(bits: u32) -> bool {
+        let view = if bits == 32 { "/reg:32" } else { "/reg:64" };
         ["scrcpy Virtual Camera", "Unity Video Capture"].iter().any(|name| {
             no_window_std(std::process::Command::new("reg.exe").args([
                 "query",
@@ -475,6 +481,7 @@ impl VcamManager {
                 "/s",
                 "/f",
                 name,
+                view,
             ]))
             .output()
             .map(|o| o.status.success())
@@ -482,10 +489,16 @@ impl VcamManager {
         })
     }
 
+    pub fn is_driver_installed() -> bool {
+        Self::driver_registered(64)
+    }
+
     pub async fn get_status(&self) -> VcamStatus {
-        let driver_installed = tokio::task::spawn_blocking(Self::is_driver_installed)
-            .await
-            .unwrap_or(false);
+        let (driver_installed, driver32_installed) = tokio::task::spawn_blocking(|| {
+            (Self::driver_registered(64), Self::driver_registered(32))
+        })
+        .await
+        .unwrap_or((false, false));
         let st = self.state.lock().await;
         match st.session {
             Some(ref sess) => {
@@ -493,6 +506,7 @@ impl VcamManager {
                 VcamStatus {
                     running: true,
                     is_driver_installed: driver_installed,
+                    is_driver32_installed: driver32_installed,
                     serial: Some(sess.serial.clone()),
                     resolution: Some(format!("{w}x{h}")),
                     fps: Some(sess.profile.fps),
@@ -503,6 +517,7 @@ impl VcamManager {
             None => VcamStatus {
                 running: false,
                 is_driver_installed: driver_installed,
+                is_driver32_installed: driver32_installed,
                 serial: None,
                 resolution: None,
                 fps: None,
